@@ -38,17 +38,31 @@
 
 ```
 ai_news_generator/
-├── main.py                # 主程序入口
-├── news_fetcher.py        # 新闻获取模块
-├── news_filter.py         # 新闻筛选模块
-├── article_generator.py   # 文章生成模块
-├── article_storage.py     # 文章存储模块
-├── scheduler.py           # 定时任务模块
-├── config.py              # 配置文件（需要自行创建）
-├── config.example.py      # 配置文件示例
-├── articles/              # 生成的文章存储目录
-├── database/              # SQLite数据库目录
-└── requirements.txt       # 项目依赖
+├── src/                  # 源代码目录
+│   ├── core/             # 核心功能模块
+│   │   ├── news_fetcher.py     # 新闻获取模块
+│   │   ├── news_filter.py      # 新闻筛选模块
+│   │   └── article_generator.py # 文章生成模块
+│   ├── storage/          # 存储相关模块
+│   │   └── article_storage.py  # 文章存储模块
+│   ├── utils/            # 工具函数和辅助模块
+│   │   └── analyze_webpage.py  # 网页分析工具
+│   ├── scheduler/        # 定时任务相关模块
+│   │   └── scheduler.py        # 定时任务模块
+│   └── main.py           # 主程序入口
+├── config/               # 配置文件目录
+│   ├── config.py         # 配置文件（需要自行创建）
+│   └── config.example.py # 配置文件示例
+├── data/                 # 数据目录
+│   ├── articles/         # 生成的文章存储目录
+│   └── database/         # SQLite数据库目录
+├── logs/                 # 日志文件目录
+│   ├── ai_news_generator.log # 主程序日志
+│   └── scheduler.log     # 定时任务日志
+├── tests/                # 测试代码目录
+│   └── test_news_sources.py # 新闻源测试
+├── setup.py              # 安装脚本
+└── requirements.txt      # 项目依赖
 ```
 
 ## 快速开始
@@ -69,11 +83,11 @@ source aInsight/bin/activate  # Linux/macOS
 pip install -r requirements.txt
 
 # 创建配置文件
-cp config.example.py config.py
-# 编辑config.py，设置你的OpenAI API密钥
+cp config/config.example.py config/config.py
+# 编辑config/config.py，设置你的OpenAI API密钥
 
 # 运行程序（带可视化进度）
-python main.py --verbose
+python src/main.py --verbose
 ```
 
 ## 使用方法
@@ -117,10 +131,10 @@ pip install -r requirements.txt
 1. 复制配置文件示例：
 
 ```bash
-cp config.example.py config.py
+cp config/config.example.py config/config.py
 ```
 
-2. 编辑config.py文件，设置你的OpenAI API密钥：
+2. 编辑config/config.py文件，设置你的OpenAI API密钥：
 
 ```python
 # OpenAI API配置
@@ -150,13 +164,13 @@ MAX_ARTICLES_PER_RUN = 5  # 每次运行最多生成的文章数量
 手动运行：
 
 ```bash
-python main.py
+python src/main.py
 ```
 
 定时运行（按照config.py中设置的时间自动执行）：
 
 ```bash
-python scheduler.py
+python src/scheduler/scheduler.py
 ```
 
 ### 选择模型
@@ -180,13 +194,13 @@ MODEL_CONFIG = {
 
 ```bash
 # 使用特定模型运行
-python main.py --model gpt-4-turbo
+python src/main.py --model gpt-4-turbo
 
 # 查看可用模型列表
-python main.py --list-models
+python src/main.py --list-models
 
 # 使用特定模型运行定时任务
-python scheduler.py --model gpt-3.5-turbo
+python src/scheduler/scheduler.py --model gpt-3.5-turbo
 ```
 
 3. **不同模型的特点**：
@@ -203,13 +217,13 @@ python scheduler.py --model gpt-3.5-turbo
 
 ```bash
 # 运行主程序并显示详细进度
-python main.py --verbose
+python src/main.py --verbose
 
 # 运行定时任务并显示详细进度
-python scheduler.py --verbose
+python src/scheduler/scheduler.py --verbose
 
 # 测试文章生成模块并显示详细进度
-python article_generator.py --verbose
+python src/core/article_generator.py --verbose
 ```
 
 可视化进度功能包括：

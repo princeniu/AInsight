@@ -13,12 +13,19 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 import re
+import sys
+
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 # 配置日志
 logger = logging.getLogger(__name__)
 
+# 获取项目根目录
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+
 # 数据库路径
-DB_PATH = os.path.join("database", "articles.db")
+DB_PATH = os.path.join(ROOT_DIR, "data", "database", "articles.db")
 
 def format_filename(title: str) -> str:
     """
@@ -81,7 +88,8 @@ def save_article_to_markdown(article_data: Dict[str, Any]) -> tuple[str, str]:
         (markdown文件路径, 文本文件路径)的元组
     """
     # 确保articles目录存在
-    os.makedirs("articles", exist_ok=True)
+    articles_dir = os.path.join(ROOT_DIR, "data", "articles")
+    os.makedirs(articles_dir, exist_ok=True)
     
     # 格式化标题作为文件名
     safe_title = format_filename(article_data["title"])
@@ -90,8 +98,8 @@ def save_article_to_markdown(article_data: Dict[str, Any]) -> tuple[str, str]:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     md_filename = f"{timestamp}_{safe_title}.md"
     txt_filename = f"{timestamp}_{safe_title}.txt"
-    md_path = os.path.join("articles", md_filename)
-    txt_path = os.path.join("articles", txt_filename)
+    md_path = os.path.join(articles_dir, md_filename)
+    txt_path = os.path.join(articles_dir, txt_filename)
     
     # 准备Markdown内容
     model_info = f"模型: {article_data.get('model_used', 'unknown')}" if 'model_used' in article_data else ""

@@ -18,9 +18,12 @@ from datetime import datetime
 import colorama
 from colorama import Fore, Style
 
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 # 导入配置
 try:
-    from config import SCHEDULE_TIME, MODEL_CONFIG
+    from config.config import SCHEDULE_TIME, MODEL_CONFIG
     DEFAULT_MODEL = MODEL_CONFIG.get("default_model", "gpt-4o")
 except ImportError:
     SCHEDULE_TIME = "08:00"  # 默认值
@@ -34,15 +37,15 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("scheduler.log"),
+        logging.FileHandler("logs/scheduler.log"),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# 获取当前脚本所在目录
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MAIN_SCRIPT = os.path.join(SCRIPT_DIR, "main.py")
+# 获取项目根目录
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+MAIN_SCRIPT = os.path.join(ROOT_DIR, "src", "main.py")
 
 
 def parse_arguments():
@@ -77,9 +80,17 @@ def run_task(model=None, verbose=False):
     运行主程序任务
     
     Args:
-        model: 要使用的模型名称，如果为None则使用默认模型
+        model: 要使用的模型名称
         verbose: 是否显示详细进度
     """
+    print_status("开始执行任务", "任务", Fore.BLUE)
+    logger.info("开始执行任务")
+    
+    # 确保目录存在
+    os.makedirs(os.path.join(ROOT_DIR, "data", "articles"), exist_ok=True)
+    os.makedirs(os.path.join(ROOT_DIR, "data", "database"), exist_ok=True)
+    os.makedirs(os.path.join(ROOT_DIR, "logs"), exist_ok=True)
+    
     if model is None:
         model = DEFAULT_MODEL
     

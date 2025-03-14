@@ -17,15 +17,18 @@ from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
 
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # 导入自定义模块
-from news_fetcher import fetch_news
-from news_filter import filter_news
-from article_generator import generate_article, get_available_models
-from article_storage import save_article_to_markdown, save_article_to_db
+from src.core.news_fetcher import fetch_news
+from src.core.news_filter import filter_news
+from src.core.article_generator import generate_article, get_available_models
+from src.storage.article_storage import save_article_to_markdown, save_article_to_db
 
 # 导入配置
 try:
-    from config import MAX_ARTICLES_PER_RUN, MODEL_CONFIG
+    from config.config import MAX_ARTICLES_PER_RUN, MODEL_CONFIG
     DEFAULT_MODEL = MODEL_CONFIG.get("default_model", "gpt-4o")
 except ImportError:
     MAX_ARTICLES_PER_RUN = 5  # 默认值
@@ -39,7 +42,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("ai_news_generator.log"),
+        logging.FileHandler("logs/ai_news_generator.log"),
         logging.StreamHandler()
     ]
 )
@@ -235,8 +238,21 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
 
 if __name__ == "__main__":
     # 确保存储目录存在
-    os.makedirs("articles", exist_ok=True)
-    os.makedirs("database", exist_ok=True)
+    os.makedirs("data/articles", exist_ok=True)
+    os.makedirs("data/database", exist_ok=True)
+    
+    # 确保日志目录存在
+    os.makedirs("logs", exist_ok=True)
+    
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("logs/ai_news_generator.log"),
+            logging.StreamHandler()
+        ]
+    )
     
     # 解析命令行参数
     args = parse_arguments()
