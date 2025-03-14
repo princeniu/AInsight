@@ -4,197 +4,212 @@
 """
 文章存储模块
 
-将生成的文章保存为Markdown文件和存储到SQLite数据库。
+将生成的文章保存为Markdown格式和存储到SQLite数据库。
 """
 
 import os
 import sqlite3
-import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
+import logging
+import re
 
 # 配置日志
 logger = logging.getLogger(__name__)
 
-# 数据库路径
-DB_PATH = os.path.join("database", "articles.db")
-
-def save_article_to_markdown(article_data: Dict[str, Any]) -> str:
+def clean_markdown_text(markdown_text: str) -> str:
     """
-    将文章保存为Markdown文件
+    清理Markdown文本中的特殊符号和格式标记
     
     Args:
-        article_data: 文章数据，包含title, content, source_url, published_date, model_used(可选)
+        markdown_text: 原始的Markdown文本
         
     Returns:
-        保存的文件路径
+        清理后的纯文本
     """
-    # 确保articles目录存在
-    os.makedirs("articles", exist_ok=True)
+    # 保存原始的换行，用特殊标记替代
+    text = markdown_text.replace('\n\n', '[PARAGRAPH]')
+    text = text.replace('\n', ' ')
     
-    # 格式化标题作为文件名（移除不允许的字符）
-    safe_title = "".join(c for c in article_data["title"] if c.isalnum() or c in " -_").strip()
-    safe_title = safe_title.replace(" ", "_")[:50]  # 限制长度
+    # 移除Markdown标题标记 (# 号)
+    text = re.sub(r'#{1,6}\s+', '', text)
+    
+    # 移除粗体和斜体标记
+    text = re.sub(r'\*\*|__', '', text)
+    text = re.sub(r'\*|_', '', text)
+    
+    # 移除列表标记
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    
+    # 移除链接，只保留文本
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    
+    # 移除图片标记
+    text = re.sub(r'!\[([^\]]*)\]\([^\)]+\)', '', text)
+    
+    # 移除代码块
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    text = re.sub(r'`[^`]+`', '', text)
+    
+    # 移除引用标记
+    text = re.sub(r'^\s*>\s+', '', text, flags=re.MULTILINE)
+    
+    # 移除水平分割线
+    text = re.sub(r'\n\s*[-*_]{3,}\s*\n', '\n\n', text)
+    
+    # 恢复段落换行
+    text = text.replace('[PARAGRAPH]', '\n\n')
+    
+    # 清理多余的空白字符
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+    
+    # 清理首尾空白
+    text = text.strip()
+    
+    return text
+
+def save_article_to_markdown(article: Dict[str, Any], output_dir: str = "articles", clean: bool = True) -> str:
+    """
+    将文章保存为Markdown格式和纯文本格式
+    
+    Args:
+        article: 包含文章信息的字典
+        output_dir: 输出目录
+        clean: 是否同时生成清理后的纯文本版本
+        
+    Returns:
+        保存的Markdown文件路径
+    """
+    os.makedirs(output_dir, exist_ok=True)
     
     # 生成文件名
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{timestamp}_{safe_title}.md"
-    file_path = os.path.join("articles", filename)
+    date_str = datetime.now().strftime("%Y%m%d")
+    safe_title = "".join(x for x in article["title"] if x.isalnum() or x in (' ', '-', '_'))
+    safe_title = safe_title[:50]  # 限制标题长度
+    filename = f"{date_str}-{safe_title}.md"
+    filepath = os.path.join(output_dir, filename)
     
-    # 准备Markdown内容
-    model_info = f"模型: {article_data.get('model_used', 'unknown')}" if 'model_used' in article_data else ""
-    
-    markdown_content = f"""# {article_data['title']}
+    # 构建Markdown内容
+    content = f"""# {article['title']}
 
-📅 {article_data['published_date']}  
-🔗 [阅读原文]({article_data['source_url']})  
-{model_info}
+📅 {article.get('published_date', datetime.now().strftime("%Y-%m-%d"))}  
+🔗 [阅读原文]({article.get('original_link', '')})  
+🤖 模型: {article.get('model', 'unknown')}
 
-{article_data['content']}
+{article['content']}
 """
     
-    # 写入文件
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(markdown_content)
-        logger.info(f"文章已保存为Markdown: {file_path}")
-        return file_path
+        # 保存原始Markdown版本
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"已保存Markdown文件: {filepath}")
+        
+        # 如果需要清理Markdown格式
+        if clean:
+            cleaned_content = clean_markdown_text(content)
+            clean_filepath = os.path.join(output_dir, f"{date_str}-{safe_title}.txt")
+            with open(clean_filepath, 'w', encoding='utf-8') as f:
+                f.write(cleaned_content)
+            logger.info(f"已保存纯文本文件: {clean_filepath}")
+    
     except Exception as e:
-        logger.error(f"保存Markdown文件时出错: {str(e)}")
+        logger.error(f"保存文件时出错: {str(e)}")
         raise
+    
+    return filepath
 
-
-def save_article_to_db(article_data: Dict[str, Any]) -> Optional[int]:
+def save_article_to_db(article: Dict[str, Any], db_path: str = "database/articles.db") -> int:
     """
     将文章保存到SQLite数据库
     
     Args:
-        article_data: 文章数据，包含title, content, source_url, published_date, model_used(可选)
+        article: 包含文章信息的字典
+        db_path: 数据库文件路径
         
     Returns:
-        文章ID，如果保存失败则返回None
+        新插入记录的ID
     """
-    # 确保database目录存在
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    
+    # 创建数据库连接
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
     
     try:
-        # 连接到数据库
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 创建表（如果不存在）
-        cursor.execute('''
+        # 创建文章表（如果不存在）
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS articles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             content TEXT NOT NULL,
-            source_url TEXT,
+            original_link TEXT,
             published_date TEXT,
-            model_used TEXT,
+            model TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        ''')
+        """)
         
-        # 插入文章数据
-        cursor.execute('''
-        INSERT INTO articles (title, content, source_url, published_date, model_used)
+        # 准备纯文本版本的内容
+        cleaned_content = clean_markdown_text(article['content'])
+        
+        # 插入文章
+        cursor.execute("""
+        INSERT INTO articles (title, content, original_link, published_date, model)
         VALUES (?, ?, ?, ?, ?)
-        ''', (
-            article_data["title"],
-            article_data["content"],
-            article_data["source_url"],
-            article_data["published_date"],
-            article_data.get("model_used", "unknown")
+        """, (
+            article['title'],
+            cleaned_content,  # 使用清理后的内容
+            article.get('original_link', ''),
+            article.get('published_date', datetime.now().strftime("%Y-%m-%d")),
+            article.get('model', 'unknown')
         ))
         
-        # 提交事务并获取文章ID
-        conn.commit()
+        # 获取新插入记录的ID
         article_id = cursor.lastrowid
         
-        # 关闭连接
-        conn.close()
+        # 提交事务
+        conn.commit()
+        logger.info(f"已将文章保存到数据库，ID: {article_id}")
         
-        logger.info(f"文章已保存到数据库，ID: {article_id}")
         return article_id
     
     except Exception as e:
+        conn.rollback()
         logger.error(f"保存到数据库时出错: {str(e)}")
-        return None
+        raise
+    
+    finally:
+        conn.close()
 
-
-def get_article_from_db(article_id: int) -> Optional[Dict[str, Any]]:
+def save_article(article: Dict[str, Any], output_dir: str = "articles", 
+                db_path: str = "database/articles.db", clean: bool = True) -> tuple:
     """
-    从数据库中获取文章
+    保存文章到Markdown文件和数据库
     
     Args:
-        article_id: 文章ID
+        article: 包含文章信息的字典
+        output_dir: Markdown文件输出目录
+        db_path: 数据库文件路径
+        clean: 是否生成清理后的纯文本版本
         
     Returns:
-        文章数据，如果未找到则返回None
+        (文件路径, 数据库ID)的元组
     """
     try:
-        # 连接到数据库
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row  # 使结果可以通过列名访问
-        cursor = conn.cursor()
+        # 保存为Markdown文件
+        filepath = save_article_to_markdown(article, output_dir, clean)
         
-        # 查询文章
-        cursor.execute('SELECT * FROM articles WHERE id = ?', (article_id,))
-        row = cursor.fetchone()
+        # 保存到数据库
+        article_id = save_article_to_db(article, db_path)
         
-        # 关闭连接
-        conn.close()
-        
-        if row:
-            # 将行转换为字典
-            article = {key: row[key] for key in row.keys()}
-            return article
-        else:
-            logger.warning(f"未找到ID为{article_id}的文章")
-            return None
+        return filepath, article_id
     
     except Exception as e:
-        logger.error(f"从数据库获取文章时出错: {str(e)}")
-        return None
-
-
-def list_articles(limit: int = 10) -> list:
-    """
-    列出最近的文章
-    
-    Args:
-        limit: 要返回的最大文章数量
-        
-    Returns:
-        文章列表，每个文章包含id, title, published_date, model_used
-    """
-    try:
-        # 连接到数据库
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 查询最近的文章
-        cursor.execute('''
-        SELECT id, title, published_date, model_used, created_at
-        FROM articles
-        ORDER BY created_at DESC
-        LIMIT ?
-        ''', (limit,))
-        
-        rows = cursor.fetchall()
-        
-        # 关闭连接
-        conn.close()
-        
-        # 将行转换为字典列表
-        articles = [{key: row[key] for key in row.keys()} for row in rows]
-        return articles
-    
-    except Exception as e:
-        logger.error(f"列出文章时出错: {str(e)}")
-        return []
-
+        logger.error(f"保存文章时出错: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     # 配置日志
@@ -203,31 +218,35 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # 测试数据
+    # 测试文章
     test_article = {
-        "title": "GPT-4o震撼发布：AI多模态能力迎来质的飞跃",
-        "content": "这是一篇测试文章的内容...",
-        "source_url": "https://example.com/news/1",
-        "published_date": "2023-05-20",
-        "model_used": "gpt-4o"
+        "title": "测试文章：AI最新突破",
+        "content": """
+# AI领域重大突破
+
+## 主要更新
+
+- 更强的理解能力
+- 更快的响应速度
+
+**重要提示**：这是一个重大更新。
+
+> 引用：这是一个测试引用
+
+```python
+print("这是一个代码块")
+```
+
+详情请看[这里](https://example.com)
+""",
+        "original_link": "https://example.com",
+        "published_date": "2024-02-20",
+        "model": "gpt-4o"
     }
     
-    # 测试保存文章
-    md_path = save_article_to_markdown(test_article)
-    print(f"文章已保存为Markdown: {md_path}")
-    
-    article_id = save_article_to_db(test_article)
-    print(f"文章已保存到数据库，ID: {article_id}")
-    
-    # 测试获取文章
-    if article_id:
-        article = get_article_from_db(article_id)
-        if article:
-            print(f"从数据库获取的文章标题: {article['title']}")
-            print(f"使用的模型: {article['model_used']}")
-    
-    # 测试列出文章
-    articles = list_articles(5)
-    print(f"最近的{len(articles)}篇文章:")
-    for article in articles:
-        print(f"- {article['id']}: {article['title']} (模型: {article['model_used']})") 
+    # 测试保存功能
+    try:
+        filepath, article_id = save_article(test_article)
+        print(f"文章已保存：\n- Markdown文件：{filepath}\n- 数据库ID：{article_id}")
+    except Exception as e:
+        print(f"保存文章时出错：{str(e)}") 
