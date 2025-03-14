@@ -11,6 +11,7 @@ import os
 import logging
 import time
 import argparse
+import sys
 from datetime import datetime
 from tqdm import tqdm
 import colorama
@@ -48,30 +49,37 @@ logger = logging.getLogger(__name__)
 def parse_arguments():
     """
     解析命令行参数
+    
+    Returns:
+        解析后的参数
     """
     parser = argparse.ArgumentParser(description="AI热点新闻自动化采集与文章生成")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
+    
+    # 添加模型选择参数
+    parser.add_argument("--model", type=str, default=None,
                         help=f"要使用的OpenAI模型 (默认: {DEFAULT_MODEL})")
-    parser.add_argument("--max-articles", type=int, default=MAX_ARTICLES_PER_RUN,
-                        help=f"最多生成的文章数量 (默认: {MAX_ARTICLES_PER_RUN})")
+    
+    # 添加列出可用模型的参数
     parser.add_argument("--list-models", action="store_true",
                         help="列出所有可用的模型")
+    
+    # 添加最大文章数量参数，使用配置文件中的值作为默认值
+    parser.add_argument("--max-articles", type=int, default=MAX_ARTICLES_PER_RUN,
+                        help=f"最大生成文章数量 (默认: {MAX_ARTICLES_PER_RUN})")
+    
+    # 添加详细输出参数
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="显示详细的进度信息")
     
-    args = parser.parse_args()
+    # 添加健康检查参数
+    parser.add_argument("--skip-health-check", action="store_true",
+                        help="跳过新闻源健康检查")
     
-    # 如果指定了--list-models参数，打印可用模型并退出
-    if args.list_models:
-        print("\n可用的模型:")
-        for model in get_available_models():
-            if model == DEFAULT_MODEL:
-                print(f"* {model} (默认)")
-            else:
-                print(f"* {model}")
-        exit(0)
+    # 添加最大源数量参数
+    parser.add_argument("--max-sources", type=int, default=None,
+                        help="每种类型的最大源数量 (默认: 不限制)")
     
-    return args
+    return parser.parse_args()
 
 
 def print_status(message, status="进行中", color=Fore.BLUE, verbose=True):
@@ -90,143 +98,139 @@ def print_status(message, status="进行中", color=Fore.BLUE, verbose=True):
         print(f"[{timestamp}] {status_text} {message}")
 
 
-def main():
+def main(model: str = None, max_articles: int = None, verbose: bool = False):
     """
-    主函数，执行完整的新闻获取、筛选、生成和存储流程
+    主程序入口
+    
+    Args:
+        model: 要使用的模型名称
+        max_articles: 最大文章数量，如果为None则使用配置文件中的值
+        verbose: 是否显示详细进度
     """
-    # 解析命令行参数
-    args = parse_arguments()
-    model = args.model
-    max_articles = args.max_articles
-    verbose = args.verbose
+    # 使用配置文件中的值作为默认值
+    if max_articles is None:
+        max_articles = MAX_ARTICLES_PER_RUN
     
     start_time = time.time()
+    
+    # 打印标题
     print("\n" + "=" * 60)
-    print(f"{Fore.CYAN}AI热点新闻自动化采集与文章生成{Style.RESET_ALL}")
-    print(f"使用模型: {Fore.GREEN}{model}{Style.RESET_ALL}")
-    print(f"最大文章数: {Fore.GREEN}{max_articles}{Style.RESET_ALL}")
+    print(f"AI热点新闻自动化采集与文章生成")
+    print(f"使用模型: {model or DEFAULT_MODEL}")
+    print(f"最大文章数: {max_articles} (来自{'命令行参数' if max_articles != MAX_ARTICLES_PER_RUN else '配置文件'})")
     print("=" * 60 + "\n")
     
-    logger.info(f"开始执行AI热点新闻自动化采集与文章生成 (使用模型: {model})")
+    # 步骤1: 获取新闻
+    print_status("开始获取新闻...", "步骤1", Fore.BLUE)
+    logger.info("步骤1: 开始获取新闻")
     
     try:
-        # 步骤1: 获取新闻
-        print_status("开始获取新闻...", "步骤1", Fore.BLUE, verbose)
-        logger.info("步骤1: 开始获取新闻")
+        with tqdm(total=100, desc="获取新闻", ncols=100, disable=not verbose) as pbar:
+            # 使用健康检查和最大源数量限制
+            news_list = fetch_news(max_sources=20, check_health=True)
+            pbar.update(100)
         
-        with tqdm(total=100, desc="获取新闻", ncols=100, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
-            pbar.update(10)  # 初始进度
-            news_list = fetch_news()
-            pbar.update(90)  # 完成进度
-        
-        if not news_list:
-            print_status("没有获取到任何新闻，程序终止", "失败", Fore.RED, True)
-            logger.warning("没有获取到任何新闻，程序终止")
-            return
-        
-        print_status(f"获取到 {len(news_list)} 条原始新闻", "完成", Fore.GREEN, True)
+        print_status(f"获取到 {len(news_list)} 条原始新闻", "完成", Fore.GREEN)
         logger.info(f"获取到 {len(news_list)} 条原始新闻")
         
-        # 步骤2: 筛选新闻
-        print_status("开始筛选新闻...", "步骤2", Fore.BLUE, verbose)
-        logger.info("步骤2: 开始筛选新闻")
-        
-        with tqdm(total=100, desc="筛选新闻", ncols=100, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
-            pbar.update(10)  # 初始进度
-            filtered_news = filter_news(news_list)
-            pbar.update(90)  # 完成进度
-        
-        if not filtered_news:
-            print_status("筛选后没有剩余新闻，程序终止", "失败", Fore.RED, True)
-            logger.warning("筛选后没有剩余新闻，程序终止")
+        if not news_list:
+            print_status("未获取到任何新闻，程序终止", "错误", Fore.RED)
+            logger.error("未获取到任何新闻，程序终止")
             return
+    except Exception as e:
+        print_status(f"获取新闻时出错: {str(e)}", "错误", Fore.RED)
+        logger.error(f"获取新闻时出错: {str(e)}")
+        return
+    
+    # 步骤2: 筛选新闻
+    print_status("开始筛选新闻...", "步骤2", Fore.BLUE)
+    logger.info("步骤2: 开始筛选新闻")
+    
+    try:
+        with tqdm(total=100, desc="筛选新闻", ncols=100, disable=not verbose) as pbar:
+            filtered_news = filter_news(news_list)
+            pbar.update(100)
         
-        print_status(f"筛选后剩余 {len(filtered_news)} 条新闻", "完成", Fore.GREEN, True)
+        print_status(f"筛选后剩余 {len(filtered_news)} 条新闻", "完成", Fore.GREEN)
         logger.info(f"筛选后剩余 {len(filtered_news)} 条新闻")
         
-        # 步骤3: 为每条筛选后的新闻生成文章
-        print_status("开始生成文章...", "步骤3", Fore.BLUE, verbose)
-        logger.info("步骤3: 开始生成文章")
-        
-        # 限制文章数量
-        articles_to_process = filtered_news[:max_articles]
-        
-        # 创建总进度条
-        with tqdm(total=len(articles_to_process), desc="文章生成总进度", ncols=100, 
-                  bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as total_pbar:
+        if not filtered_news:
+            print_status("筛选后没有符合条件的新闻，程序终止", "警告", Fore.YELLOW)
+            logger.warning("筛选后没有符合条件的新闻，程序终止")
+            return
+    except Exception as e:
+        print_status(f"筛选新闻时出错: {str(e)}", "错误", Fore.RED)
+        logger.error(f"筛选新闻时出错: {str(e)}")
+        return
+    
+    # 步骤3: 生成文章
+    print_status("开始生成文章...", "步骤3", Fore.BLUE)
+    logger.info("步骤3: 开始生成文章")
+    
+    # 限制文章数量
+    filtered_news = filtered_news[:max_articles]
+    
+    # 生成文章
+    articles = []
+    with tqdm(total=len(filtered_news), desc="文章生成总进度", ncols=100, disable=not verbose) as pbar:
+        for i, news in enumerate(filtered_news):
+            print_status(f"正在处理第 {i+1}/{len(filtered_news)} 条新闻: {news['title']}", "处理中", Fore.YELLOW)
+            logger.info(f"正在处理第 {i+1}/{len(filtered_news)} 条新闻: {news['title']}")
             
-            for i, news in enumerate(articles_to_process):
-                print_status(f"正在处理第 {i+1}/{len(articles_to_process)} 条新闻: {news['title']}", "处理中", Fore.YELLOW, verbose)
-                logger.info(f"正在处理第 {i+1}/{min(max_articles, len(filtered_news))} 条新闻: {news['title']}")
+            try:
+                # 生成文章
+                print_status(f"正在使用模型 {model or DEFAULT_MODEL} 生成文章 (尝试 1/3)", "生成", Fore.YELLOW)
+                print_status(f"文章标题: {news['title']}", "标题", Fore.CYAN)
+                article_content = generate_article(news, model=model, verbose=verbose)
                 
-                try:
-                    # 生成文章
-                    with tqdm(total=100, desc=f"生成文章 {i+1}/{len(articles_to_process)}", 
-                              ncols=100, leave=False, 
-                              bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as article_pbar:
-                        article_pbar.update(10)  # 开始生成
-                        article = generate_article(news, model=model)
-                        article_pbar.update(90)  # 完成生成
-                    
-                    if not article:
-                        print_status(f"文章生成失败: {news['title']}", "失败", Fore.RED, True)
-                        logger.warning(f"文章生成失败: {news['title']}")
-                        total_pbar.update(1)
-                        continue
-                    
-                    # 步骤4: 存储文章
-                    print_status(f"存储文章: {news['title']}", "步骤4", Fore.BLUE, verbose)
-                    logger.info(f"步骤4: 存储文章 - {news['title']}")
-                    
-                    # 创建文章元数据
-                    article_data = {
+                if article_content:
+                    # 创建文章对象
+                    article = {
                         "title": news["title"],
-                        "content": article,
+                        "content": article_content,
                         "source_url": news["link"],
                         "published_date": news["published_date"],
-                        "model_used": model  # 记录使用的模型
+                        "model_used": model or DEFAULT_MODEL
                     }
+                    articles.append(article)
                     
-                    # 保存到Markdown
-                    with tqdm(total=100, desc="保存为Markdown", ncols=100, leave=False, 
-                              bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as save_pbar:
-                        save_pbar.update(50)
-                        md_path = save_article_to_markdown(article_data)
-                        save_pbar.update(50)
+                    # 步骤4: 存储文章
+                    print_status(f"存储文章: {article['title']}", "步骤4", Fore.BLUE)
+                    logger.info(f"步骤4: 存储文章 - {article['title']}")
                     
-                    print_status(f"文章已保存为Markdown: {md_path}", "完成", Fore.GREEN, verbose)
-                    logger.info(f"文章已保存为Markdown: {md_path}")
-                    
-                    # 保存到数据库
-                    with tqdm(total=100, desc="保存到数据库", ncols=100, leave=False, 
-                              bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as db_pbar:
-                        db_pbar.update(50)
-                        article_id = save_article_to_db(article_data)
-                        db_pbar.update(50)
-                    
-                    print_status(f"文章已保存到数据库，ID: {article_id}", "完成", Fore.GREEN, verbose)
-                    logger.info(f"文章已保存到数据库，ID: {article_id}")
-                    
-                    # 更新总进度条
-                    total_pbar.update(1)
-                    
-                except Exception as e:
-                    print_status(f"处理新闻时出错: {str(e)}", "错误", Fore.RED, True)
-                    logger.error(f"处理新闻时出错: {str(e)}", exc_info=True)
-                    total_pbar.update(1)
-        
-        elapsed_time = time.time() - start_time
-        print("\n" + "=" * 60)
-        print(f"{Fore.GREEN}AI热点新闻自动化采集与文章生成完成!{Style.RESET_ALL}")
-        print(f"总耗时: {Fore.YELLOW}{elapsed_time:.2f}秒{Style.RESET_ALL}")
-        print(f"成功生成文章数: {Fore.GREEN}{len(articles_to_process)}{Style.RESET_ALL}")
-        print("=" * 60 + "\n")
-        
-        logger.info(f"AI热点新闻自动化采集与文章生成完成，耗时: {elapsed_time:.2f}秒")
-        
-    except Exception as e:
-        print_status(f"程序执行过程中出错: {str(e)}", "错误", Fore.RED, True)
-        logger.error(f"程序执行过程中出错: {str(e)}", exc_info=True)
+                    try:
+                        # 保存文章到Markdown和纯文本
+                        md_path, txt_path = save_article_to_markdown(article)
+                        print_status(f"文章已保存为Markdown: {md_path}", "完成", Fore.GREEN)
+                        print_status(f"文章已保存为纯文本: {txt_path}", "完成", Fore.GREEN)
+                        logger.info(f"文章已保存为Markdown: {md_path}")
+                        logger.info(f"文章已保存为纯文本: {txt_path}")
+                        
+                        # 保存文章到数据库
+                        article_id = save_article_to_db(article)
+                        print_status(f"文章已保存到数据库，ID: {article_id}", "完成", Fore.GREEN)
+                        logger.info(f"文章已保存到数据库，ID: {article_id}")
+                    except Exception as e:
+                        print_status(f"保存文章时出错: {str(e)}", "错误", Fore.RED)
+                        logger.error(f"保存文章时出错: {str(e)}")
+                else:
+                    print_status(f"文章生成失败: {news['title']}", "失败", Fore.RED)
+                    logger.error(f"文章生成失败: {news['title']}")
+            except Exception as e:
+                print_status(f"处理新闻时出错: {str(e)}", "错误", Fore.RED)
+                logger.error(f"处理新闻时出错: {str(e)}")
+            
+            pbar.update(1)
+    
+    # 总结
+    elapsed_time = time.time() - start_time
+    print("\n" + "=" * 60)
+    print(f"AI热点新闻自动化采集与文章生成完成!")
+    print(f"总耗时: {elapsed_time:.2f}秒")
+    print(f"成功生成文章数: {len(articles)}")
+    print("=" * 60 + "\n")
+    
+    logger.info(f"AI热点新闻自动化采集与文章生成完成，耗时: {elapsed_time:.2f}秒")
 
 
 if __name__ == "__main__":
@@ -234,5 +238,32 @@ if __name__ == "__main__":
     os.makedirs("articles", exist_ok=True)
     os.makedirs("database", exist_ok=True)
     
-    # 执行主程序
-    main() 
+    # 解析命令行参数
+    args = parse_arguments()
+    
+    # 如果请求列出模型，则显示可用模型并退出
+    if args.list_models:
+        models = get_available_models()
+        print("\n可用的模型:")
+        for i, model in enumerate(models):
+            if model == DEFAULT_MODEL:
+                print(f"  {model} (默认)")
+            else:
+                print(f"  {model}")
+        print()
+        sys.exit(0)
+    
+    # 运行主程序
+    try:
+        main(
+            model=args.model,
+            max_articles=args.max_articles,
+            verbose=args.verbose
+        )
+    except KeyboardInterrupt:
+        print("\n程序被用户中断")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n程序执行过程中出错: {str(e)}")
+        logger.error(f"程序执行过程中出错: {str(e)}", exc_info=True)
+        sys.exit(1) 

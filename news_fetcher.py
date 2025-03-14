@@ -255,79 +255,123 @@ def fetch_from_rss(source: Dict[str, str]) -> List[Dict[str, Any]]:
             response.raise_for_status()  # 如果状态码不是200，会抛出异常
             
             logger.debug(f"{source['name']} RSS源可访问，状态码: {response.status_code}")
-            feed = feedparser.parse(source["url"])
+            
+            # 检查内容类型是否为XML
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'xml' not in content_type and 'rss' not in content_type and 'application/atom+xml' not in content_type:
+                logger.warning(f"{source['name']} 返回的内容类型不是XML: {content_type}")
+                # 尝试强制解析，但记录警告
+            
+            # 使用响应内容而不是URL来解析，避免重复请求
+            feed = feedparser.parse(response.content)
             
             # 检查是否成功解析到条目
             if not feed.entries and 'backup_url' in source:
                 logger.warning(f"{source['name']} 主URL未返回条目，尝试备用URL")
-                feed = feedparser.parse(source["backup_url"])
+                backup_response = requests.get(source["backup_url"], headers=headers, timeout=10)
+                backup_response.raise_for_status()
+                feed = feedparser.parse(backup_response.content)
         
-        except Exception as e:
-            # 如果主URL失败且有备用URL，尝试备用URL
+        except requests.exceptions.HTTPError as e:
+            # HTTP错误（如404, 500等）
             if 'backup_url' in source:
-                logger.warning(f"{source['name']} 主URL访问失败: {str(e)}，尝试备用URL")
-                feed = feedparser.parse(source["backup_url"])
+                logger.warning(f"{source['name']} 主URL HTTP错误: {str(e)}，尝试备用URL")
+                try:
+                    backup_response = requests.get(source["backup_url"], headers=headers, timeout=10)
+                    backup_response.raise_for_status()
+                    feed = feedparser.parse(backup_response.content)
+                except Exception as be:
+                    logger.error(f"{source['name']} 备用URL也失败: {str(be)}")
+                    return []
             else:
-                # 没有备用URL，重新抛出异常
-                raise
+                logger.error(f"{source['name']} HTTP错误: {str(e)}")
+                return []
+                
+        except requests.exceptions.ConnectionError as e:
+            # 连接错误
+            logger.error(f"{source['name']} 连接错误: {str(e)}")
+            return []
+            
+        except requests.exceptions.Timeout as e:
+            # 超时错误
+            logger.error(f"{source['name']} 请求超时: {str(e)}")
+            return []
+            
+        except requests.exceptions.RequestException as e:
+            # 其他请求错误
+            logger.error(f"{source['name']} 请求错误: {str(e)}")
+            return []
         
         # 检查feed是否有错误
-        if hasattr(feed, 'bozo_exception'):
-            logger.warning(f"{source['name']} RSS解析警告: {feed.bozo_exception}")
+        if hasattr(feed, 'bozo') and feed.bozo:
+            logger.warning(f"{source['name']} RSS解析警告: {getattr(feed, 'bozo_exception', 'Unknown error')}")
+            # 如果解析错误但仍有条目，继续处理
+            if not feed.entries:
+                logger.error(f"{source['name']} RSS解析失败且没有条目")
+                return []
         
         # 记录获取到的条目数量
         logger.debug(f"{source['name']} 获取到 {len(feed.entries)} 条原始条目")
         
         for entry in feed.entries:
-            # 提取标题
-            title = entry.get("title", "").strip()
-            
-            # 提取摘要
-            summary = ""
-            if hasattr(entry, "summary"):
-                summary = entry.summary
-            elif hasattr(entry, "description"):
-                summary = entry.description
-            elif hasattr(entry, "content"):
-                # 有些RSS源使用content字段
-                for content in entry.content:
-                    if content.get('type') == 'text/html':
-                        summary = content.value
-                        break
-            
-            # 清理HTML标签
-            if summary:
-                soup = BeautifulSoup(summary, "html.parser")
-                summary = soup.get_text().strip()
-            
-            # 提取链接
-            link = entry.get("link", "")
-            
-            # 提取发布日期
-            published_date = datetime.now().strftime("%Y-%m-%d")
-            if hasattr(entry, "published"):
-                published_date = parse_date(entry.published)
-            elif hasattr(entry, "updated"):
-                published_date = parse_date(entry.updated)
-            elif hasattr(entry, "pubDate"):
-                published_date = parse_date(entry.pubDate)
-            
-            # 创建新闻项
-            if title and link:
-                news_item = {
-                    "title": title,
-                    "summary": summary[:300] + "..." if len(summary) > 300 else summary,
-                    "link": link,
-                    "published_date": published_date,
-                    "source": source["name"],
-                    "category": source["category"]
-                }
-                news_list.append(news_item)
+            try:
+                # 提取标题
+                title = entry.get("title", "").strip()
+                
+                # 提取摘要
+                summary = ""
+                if hasattr(entry, "summary"):
+                    summary = entry.summary
+                elif hasattr(entry, "description"):
+                    summary = entry.description
+                elif hasattr(entry, "content"):
+                    # 有些RSS源使用content字段
+                    for content in entry.content:
+                        if content.get('type') == 'text/html':
+                            summary = content.value
+                            break
+                
+                # 清理HTML标签
+                if summary:
+                    try:
+                        soup = BeautifulSoup(summary, "html.parser")
+                        summary = soup.get_text().strip()
+                    except Exception as e:
+                        logger.warning(f"清理HTML标签失败: {str(e)}")
+                        # 如果BeautifulSoup失败，尝试简单的HTML标签移除
+                        summary = summary.replace('<', ' <').replace('>', '> ')
+                
+                # 提取链接
+                link = entry.get("link", "")
+                
+                # 提取发布日期
+                published_date = datetime.now().strftime("%Y-%m-%d")
+                if hasattr(entry, "published"):
+                    published_date = parse_date(entry.published)
+                elif hasattr(entry, "updated"):
+                    published_date = parse_date(entry.updated)
+                elif hasattr(entry, "pubDate"):
+                    published_date = parse_date(entry.pubDate)
+                
+                # 创建新闻项
+                if title and link:
+                    news_item = {
+                        "title": title,
+                        "summary": summary[:300] + "..." if len(summary) > 300 else summary,
+                        "link": link,
+                        "published_date": published_date,
+                        "source": source["name"],
+                        "category": source["category"]
+                    }
+                    news_list.append(news_item)
+            except Exception as e:
+                logger.warning(f"处理 {source['name']} 的条目时出错: {str(e)}")
+                continue
         
         logger.info(f"从 {source['name']} 获取到 {len(news_list)} 条新闻")
         
     except Exception as e:
-        logger.error(f"从 {source['name']} 获取RSS新闻失败: {str(e)}", exc_info=True)
+        logger.error(f"从 {source['name']} 获取RSS新闻失败: {str(e)}")
     
     return news_list
 
@@ -355,182 +399,187 @@ def fetch_from_web(source: Dict[str, Any]) -> List[Dict[str, Any]]:
             "Upgrade-Insecure-Requests": "1"
         }
         
-        response = requests.get(source["url"], headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, "html.parser")
-        
-        # 根据不同网站使用不同的解析逻辑
-        if source["name"] == "The Verge AI":
-            # 更新The Verge AI的选择器
-            articles = []
+        try:
+            # 增加重试机制
+            max_retries = 3
+            retry_delay = 2  # 秒
             
-            # 尝试找到文章列表容器
-            sections = soup.select("section")
-            if sections and len(sections) > 0:
-                # 找到包含文章的section
-                for section in sections:
-                    # 查找所有链接
-                    links = section.find_all("a")
-                    # 过滤掉导航链接和非文章链接
-                    article_links = []
-                    for link in links:
-                        href = link.get("href", "")
-                        # 文章链接通常包含数字ID
-                        if href and "/" in href and any(c.isdigit() for c in href) and not href.startswith(("/auth", "/tech", "/reviews")):
-                            article_links.append(link)
-                    
-                    if len(article_links) > 3:  # 如果找到多个文章链接
-                        for link in article_links[:10]:  # 限制为前10篇文章
-                            title = link.get_text().strip()
-                            url = link.get("href", "")
-                            
-                            # 确保链接是完整的URL
-                            if url and not url.startswith(("http://", "https://")):
-                                url = "https://www.theverge.com" + url
-                            
-                            if title and url:
-                                # 创建文章对象
-                                article = {
-                                    "title": title,
-                                    "link": url,
-                                    "summary": "",  # 没有摘要
-                                    "published_date": datetime.now().strftime("%Y-%m-%d"),  # 使用当前日期
-                                    "source": source["name"],
-                                    "category": source["category"]
-                                }
-                                articles.append(article)
-            
-            # 如果找到文章，添加到新闻列表
-            if articles:
-                news_list.extend(articles)
-            else:
-                logger.warning(f"无法从 {source['name']} 找到文章")
-        
-        elif source["name"] == "Wired AI":
-            articles = soup.select("div.summary-item")
-            for article in articles[:10]:  # 限制为前10篇文章
-                title_elem = article.select_one("h3")
-                link_elem = article.select_one("a")
-                summary_elem = article.select_one("div.summary-item__dek")
-                date_elem = article.select_one("time.summary-item__timestamp")
-                
-                if title_elem and link_elem:
-                    title = title_elem.get_text().strip()
-                    link = link_elem.get("href", "")
-                    if not link.startswith("http"):
-                        link = "https://www.wired.com" + link
-                    
-                    # 获取摘要
-                    summary = ""
-                    if summary_elem:
-                        summary = summary_elem.get_text().strip()
-                    
-                    # 获取发布日期
-                    published_date = datetime.now().strftime("%Y-%m-%d")
-                    if date_elem and date_elem.get("datetime"):
-                        published_date = parse_date(date_elem["datetime"])
-                    
-                    if title and link:
-                        news_item = {
-                            "title": title,
-                            "summary": summary[:300] + "..." if len(summary) > 300 else summary,
-                            "link": link,
-                            "published_date": published_date,
-                            "source": source["name"],
-                            "category": source["category"]
-                        }
-                        news_list.append(news_item)
-        
-        # 使用通用选择器处理新增的网页源
-        elif "selector" in source:
-            selector = source["selector"]
-            articles = soup.select(selector["article"])
-            for article in articles[:10]:  # 限制为前10篇文章
-                title_elem = article.select_one(selector["title"])
-                link_elem = article.select_one(selector["link"])
-                summary_elem = article.select_one(selector["summary"]) if "summary" in selector else None
-                date_elem = article.select_one(selector["date"]) if "date" in selector else None
-                
-                if title_elem and link_elem:
-                    title = title_elem.get_text().strip()
-                    
-                    # 获取链接
-                    if hasattr(link_elem, "get"):
-                        link = link_elem.get("href", "")
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(source["url"], headers=headers, timeout=15)
+                    response.raise_for_status()
+                    break  # 成功获取，跳出循环
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"{source['name']} 请求失败 (尝试 {attempt+1}/{max_retries}): {str(e)}")
+                        time.sleep(retry_delay * (attempt + 1))  # 指数退避
                     else:
-                        link = link_elem.attrs.get("href", "")
-                    
-                    # 确保链接是完整的URL
-                    if link and not link.startswith(("http://", "https://")):
-                        # 提取域名
-                        domain = source["url"].split("//")[0] + "//" + source["url"].split("//")[1].split("/")[0]
-                        link = domain + (link if link.startswith("/") else "/" + link)
-                    
-                    # 获取摘要
-                    summary = ""
-                    if summary_elem:
-                        summary = summary_elem.get_text().strip()
-                    
-                    # 获取发布日期
-                    published_date = datetime.now().strftime("%Y-%m-%d")
-                    if date_elem:
-                        date_str = None
-                        if date_elem.get("datetime"):
-                            date_str = date_elem.get("datetime")
-                        else:
-                            date_str = date_elem.get_text().strip()
+                        raise  # 最后一次尝试仍失败，抛出异常
+            
+            # 检查响应内容是否为空
+            if not response.text:
+                logger.warning(f"{source['name']} 返回了空内容")
+                return []
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # 根据不同网站使用不同的解析逻辑
+            if "selector" in source:
+                # 使用自定义选择器
+                selector = source["selector"]
+                articles = soup.select(selector.get("article", "article"))
+                
+                if not articles:
+                    logger.warning(f"{source['name']} 未找到文章元素，选择器可能需要更新")
+                    return []
+                
+                for article in articles[:10]:  # 限制为前10篇文章
+                    try:
+                        # 提取标题
+                        title_elem = article.select_one(selector.get("title", "h2"))
+                        title = title_elem.get_text().strip() if title_elem else ""
                         
-                        if date_str:
-                            published_date = parse_date(date_str)
-                    
-                    if title and link:
-                        news_item = {
-                            "title": title,
-                            "summary": summary[:300] + "..." if len(summary) > 300 else summary,
-                            "link": link,
-                            "published_date": published_date,
-                            "source": source["name"],
-                            "category": source["category"]
-                        }
-                        news_list.append(news_item)
-        
-        logger.info(f"从 {source['name']} 爬取到 {len(news_list)} 条新闻")
-        
+                        # 提取链接
+                        link_elem = article.select_one(selector.get("link", "a"))
+                        link = link_elem.get("href", "") if link_elem else ""
+                        
+                        # 确保链接是完整的URL
+                        if link and not link.startswith(("http://", "https://")):
+                            # 从源URL中提取域名
+                            domain = "/".join(source["url"].split("/")[:3])
+                            link = domain + (link if link.startswith("/") else "/" + link)
+                        
+                        # 提取摘要
+                        summary_elem = article.select_one(selector.get("summary", "p"))
+                        summary = summary_elem.get_text().strip() if summary_elem else ""
+                        
+                        # 提取日期
+                        date_elem = article.select_one(selector.get("date", "time"))
+                        published_date = datetime.now().strftime("%Y-%m-%d")
+                        if date_elem:
+                            date_text = date_elem.get_text().strip()
+                            if date_text:
+                                published_date = parse_date(date_text)
+                        
+                        # 创建新闻项
+                        if title and link:
+                            news_item = {
+                                "title": title,
+                                "summary": summary[:300] + "..." if len(summary) > 300 else summary,
+                                "link": link,
+                                "published_date": published_date,
+                                "source": source["name"],
+                                "category": source["category"]
+                            }
+                            news_list.append(news_item)
+                    except Exception as e:
+                        logger.warning(f"处理 {source['name']} 的文章时出错: {str(e)}")
+                        continue
+            else:
+                # 特定网站的自定义解析逻辑
+                # ... 其他特定网站的解析逻辑 ...
+                pass
+            
+            logger.info(f"从 {source['name']} 爬取到 {len(news_list)} 条新闻")
+            
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"{source['name']} HTTP错误: {str(e)}")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"{source['name']} 连接错误: {str(e)}")
+        except requests.exceptions.Timeout as e:
+            logger.error(f"{source['name']} 请求超时: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"{source['name']} 请求错误: {str(e)}")
+        except Exception as e:
+            logger.error(f"{source['name']} 爬取网页新闻失败: {str(e)}")
+    
     except Exception as e:
-        logger.error(f"从 {source['name']} 爬取网页新闻失败: {str(e)}", exc_info=True)
+        logger.error(f"从 {source['name']} 爬取网页新闻时发生未预期错误: {str(e)}")
     
     return news_list
 
 
-def fetch_news() -> List[Dict[str, Any]]:
+def check_source_health(sources: List[Dict[str, Any]], source_type: str = "rss") -> List[Dict[str, Any]]:
+    """
+    检查新闻源的健康状态，标记或更新失效的源
+    
+    Args:
+        sources: 新闻源列表
+        source_type: 源类型，"rss"或"web"
+        
+    Returns:
+        更新后的新闻源列表
+    """
+    healthy_sources = []
+    unhealthy_sources = []
+    
+    for source in sources:
+        try:
+            headers = {'User-Agent': get_random_user_agent()}
+            response = requests.get(source["url"], headers=headers, timeout=5)
+            
+            if response.status_code >= 400:
+                logger.warning(f"{source['name']} 返回状态码 {response.status_code}，可能不健康")
+                unhealthy_sources.append(source)
+            else:
+                healthy_sources.append(source)
+                
+        except Exception as e:
+            logger.warning(f"{source['name']} 健康检查失败: {str(e)}")
+            unhealthy_sources.append(source)
+    
+    # 记录不健康的源
+    if unhealthy_sources:
+        logger.warning(f"发现 {len(unhealthy_sources)} 个不健康的{source_type}源: " + 
+                      ", ".join([s["name"] for s in unhealthy_sources]))
+    
+    return healthy_sources
+
+
+def fetch_news(max_sources: int = None, check_health: bool = True) -> List[Dict[str, Any]]:
     """
     从所有来源获取新闻
     
+    Args:
+        max_sources: 最大源数量，None表示不限制
+        check_health: 是否检查源健康状态
+        
     Returns:
-        所有来源的新闻列表
+        新闻列表
     """
     all_news = []
     
-    # 从RSS源获取新闻
-    for source in RSS_SOURCES:
-        try:
-            news = fetch_from_rss(source)
-            all_news.extend(news)
-            # 添加随机延迟，避免请求过于频繁
-            time.sleep(random.uniform(1, 3))
-        except Exception as e:
-            logger.error(f"处理RSS源 {source['name']} 时出错: {str(e)}", exc_info=True)
+    # 检查RSS源健康状态
+    rss_sources = RSS_SOURCES
+    if check_health:
+        rss_sources = check_source_health(RSS_SOURCES, "rss")
     
-    # 从网页爬取新闻
-    for source in WEB_SOURCES:
-        try:
-            news = fetch_from_web(source)
-            all_news.extend(news)
-            # 添加随机延迟，避免请求过于频繁
-            time.sleep(random.uniform(2, 5))
-        except Exception as e:
-            logger.error(f"处理网页源 {source['name']} 时出错: {str(e)}", exc_info=True)
+    # 限制源数量
+    if max_sources:
+        rss_sources = rss_sources[:max_sources]
+    
+    # 从RSS源获取新闻
+    for source in rss_sources:
+        news = fetch_from_rss(source)
+        all_news.extend(news)
+        # 添加短暂延迟，避免请求过于频繁
+        time.sleep(0.5)
+    
+    # 检查网页源健康状态
+    web_sources = WEB_SOURCES
+    if check_health:
+        web_sources = check_source_health(WEB_SOURCES, "web")
+    
+    # 限制源数量
+    if max_sources:
+        web_sources = web_sources[:max_sources]
+    
+    # 从网页源获取新闻
+    for source in web_sources:
+        news = fetch_from_web(source)
+        all_news.extend(news)
+        # 添加短暂延迟，避免请求过于频繁
+        time.sleep(0.5)
     
     logger.info(f"总共获取到 {len(all_news)} 条新闻")
     return all_news
