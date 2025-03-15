@@ -18,6 +18,28 @@ from datetime import datetime
 import colorama
 from colorama import Fore, Style
 
+# 尝试导入pytz，如果不存在则使用内置的时区处理
+try:
+    import pytz
+    HAS_PYTZ = True
+    print(f"成功导入pytz库，版本: {pytz.__version__}")
+except ImportError as e:
+    HAS_PYTZ = False
+    print(f"警告: 无法导入pytz库 ({str(e)})，将使用系统本地时区。建议安装pytz以获得更好的时区支持: pip install pytz")
+    # 尝试查找系统中的pytz库
+    import sys
+    print(f"Python路径: {sys.path}")
+    # 尝试使用pip查看已安装的pytz
+    try:
+        import subprocess
+        result = subprocess.run(["pip", "show", "pytz"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"系统中已安装pytz:\n{result.stdout}")
+        else:
+            print(f"系统中未找到pytz: {result.stderr}")
+    except Exception as e2:
+        print(f"尝试检查pytz安装时出错: {str(e2)}")
+
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -26,11 +48,12 @@ from src.utils.telegram_notifier import TelegramNotifier  # 导入Telegram通知
 
 # 导入配置
 try:
-    from config.config import SCHEDULE_TIME, MODEL_CONFIG
+    from config.config import SCHEDULE_TIME, MODEL_CONFIG, TIMEZONE
     DEFAULT_MODEL = MODEL_CONFIG.get("default_model", "gpt-4o")
 except ImportError:
     SCHEDULE_TIME = "08:00"  # 默认值
     DEFAULT_MODEL = "gpt-4o"  # 默认模型
+    TIMEZONE = "Asia/Shanghai"  # 默认时区
 
 # 初始化colorama
 colorama.init()
@@ -226,16 +249,22 @@ def setup_schedule(model=None, verbose=False):
     def scheduled_task():
         run_task(model, verbose)
     
-    # 使用配置的时间运行任务
-    schedule.every().day.at(SCHEDULE_TIME).do(scheduled_task)
-    print_status(f"已设置定时任务: 每天{SCHEDULE_TIME}运行 (使用模型: {model})", "设置", Fore.GREEN)
-    logger.info(f"已设置定时任务: 每天{SCHEDULE_TIME}运行 (使用模型: {model})")
+    # 使用配置的时间和时区运行任务
+    if HAS_PYTZ:
+        schedule.every().day.at(SCHEDULE_TIME, TIMEZONE).do(scheduled_task)
+        print_status(f"已设置定时任务: 每天{SCHEDULE_TIME} ({TIMEZONE}时区) 运行 (使用模型: {model})", "设置", Fore.GREEN)
+        logger.info(f"已设置定时任务: 每天{SCHEDULE_TIME} ({TIMEZONE}时区) 运行 (使用模型: {model})")
+    else:
+        schedule.every().day.at(SCHEDULE_TIME).do(scheduled_task)
+        print_status(f"已设置定时任务: 每天{SCHEDULE_TIME} (系统本地时区) 运行 (使用模型: {model})", "设置", Fore.GREEN)
+        logger.info(f"已设置定时任务: 每天{SCHEDULE_TIME} (系统本地时区) 运行 (使用模型: {model})")
     
     # 发送Telegram通知：定时器启动
     if telegram:
+        timezone_info = f"({TIMEZONE}时区)" if HAS_PYTZ else "(系统本地时区)"
         schedule_message = (
             f"<b>🕒 AI新闻自动化定时器已启动</b>\n\n"
-            f"<b>📅 执行计划:</b> 每天 {SCHEDULE_TIME}\n"
+            f"<b>📅 执行计划:</b> 每天 {SCHEDULE_TIME} {timezone_info}\n"
             f"<b>🤖 使用模型:</b> {model}\n"
             f"<b>📊 详细输出:</b> {'开启' if verbose else '关闭'}\n\n"
             f"<i>定时器将按计划自动执行任务</i>"
@@ -248,11 +277,23 @@ def setup_schedule(model=None, verbose=False):
     try:
         schedule_hour = int(SCHEDULE_TIME.split(":")[0])
         
+        # 获取当前时间（考虑时区）
+        if HAS_PYTZ:
+            # 获取指定时区的当前时间
+            tz = pytz.timezone(TIMEZONE)
+            current_time = datetime.now(tz)
+            current_hour = current_time.hour
+            timezone_info = f"(当前{TIMEZONE}时区时间: {current_time.strftime('%H:%M:%S')})"
+        else:
+            # 使用系统本地时间
+            current_time = datetime.now()
+            current_hour = current_time.hour
+            timezone_info = f"(当前系统本地时间: {current_time.strftime('%H:%M:%S')})"
+        
         # 如果当前时间已经过了设定时间，则立即运行一次（仅在首次启动时）
-        current_hour = datetime.now().hour
         if current_hour >= schedule_hour:
-            print_status("首次启动，立即执行一次任务", "首次", Fore.YELLOW)
-            logger.info("首次启动，立即执行一次任务")
+            print_status(f"首次启动，立即执行一次任务 {timezone_info}", "首次", Fore.YELLOW)
+            logger.info(f"首次启动，立即执行一次任务 {timezone_info}")
             run_task(model, verbose)
     except (ValueError, IndexError):
         print_status(f"无法解析时间格式: {SCHEDULE_TIME}，使用默认行为", "警告", Fore.YELLOW)
@@ -288,7 +329,9 @@ def generate_cron_config(model=None, verbose=False):
     print(f"{Fore.CYAN}Cron配置{Style.RESET_ALL}")
     print("要设置cron定时任务，请运行以下命令:")
     print(f"{Fore.YELLOW}(crontab -l 2>/dev/null; echo '{cron_line}') | crontab -{Style.RESET_ALL}")
-    print(f"\n这将在每天{SCHEDULE_TIME}自动运行任务")
+    
+    timezone_info = f"({TIMEZONE}时区)" if HAS_PYTZ else "(系统本地时区)"
+    print(f"\n这将在每天{SCHEDULE_TIME} {timezone_info}自动运行任务")
     if model:
         print(f"使用模型: {Fore.GREEN}{model}{Style.RESET_ALL}")
     if verbose:
@@ -308,7 +351,10 @@ def main():
     print("\n" + "=" * 60)
     print(f"{Fore.CYAN}AI热点新闻自动化采集与文章生成定时器{Style.RESET_ALL}")
     print(f"使用模型: {Fore.GREEN}{model}{Style.RESET_ALL}")
-    print(f"定时执行时间: {Fore.GREEN}{SCHEDULE_TIME}{Style.RESET_ALL}")
+    
+    timezone_info = f"({TIMEZONE}时区)" if HAS_PYTZ else "(系统本地时区)"
+    print(f"定时执行时间: {Fore.GREEN}{SCHEDULE_TIME} {timezone_info}{Style.RESET_ALL}")
+    
     print(f"显示详细进度: {Fore.GREEN}{verbose}{Style.RESET_ALL}")
     if telegram:
         print(f"Telegram通知: {Fore.GREEN}已启用{Style.RESET_ALL}")
@@ -332,10 +378,26 @@ def main():
         # 显示下一次运行时间
         next_run = schedule.next_run()
         if next_run:
-            time_diff = next_run - datetime.now()
-            hours, remainder = divmod(time_diff.seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            print_status(f"下一次运行时间: {next_run.strftime('%Y-%m-%d %H:%M:%S')} (还有 {hours}小时 {minutes}分钟 {seconds}秒)", "计划", Fore.YELLOW)
+            if HAS_PYTZ:
+                # 将下一次运行时间转换为指定时区的时间
+                tz = pytz.timezone(TIMEZONE)
+                next_run_tz = next_run.replace(tzinfo=pytz.UTC).astimezone(tz)
+                
+                # 计算时间差
+                now_tz = datetime.now(tz)
+                time_diff = next_run_tz - now_tz
+                hours, remainder = divmod(time_diff.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                
+                timezone_info = f"({TIMEZONE}时区)"
+                print_status(f"下一次运行时间: {next_run_tz.strftime('%Y-%m-%d %H:%M:%S')} {timezone_info} (还有 {hours}小时 {minutes}分钟 {seconds}秒)", "计划", Fore.YELLOW)
+            else:
+                # 使用系统本地时间
+                time_diff = next_run - datetime.now()
+                hours, remainder = divmod(time_diff.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                
+                print_status(f"下一次运行时间: {next_run.strftime('%Y-%m-%d %H:%M:%S')} (系统本地时区) (还有 {hours}小时 {minutes}分钟 {seconds}秒)", "计划", Fore.YELLOW)
         
         # 定时任务循环
         while True:
@@ -345,10 +407,26 @@ def main():
             if datetime.now().second == 0:
                 next_run = schedule.next_run()
                 if next_run:
-                    time_diff = next_run - datetime.now()
-                    hours, remainder = divmod(time_diff.seconds, 3600)
-                    minutes, seconds = divmod(remainder, 60)
-                    print_status(f"下一次运行时间: {next_run.strftime('%Y-%m-%d %H:%M:%S')} (还有 {hours}小时 {minutes}分钟 {seconds}秒)", "计划", Fore.YELLOW)
+                    if HAS_PYTZ:
+                        # 将下一次运行时间转换为指定时区的时间
+                        tz = pytz.timezone(TIMEZONE)
+                        next_run_tz = next_run.replace(tzinfo=pytz.UTC).astimezone(tz)
+                        
+                        # 计算时间差
+                        now_tz = datetime.now(tz)
+                        time_diff = next_run_tz - now_tz
+                        hours, remainder = divmod(time_diff.seconds, 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        
+                        timezone_info = f"({TIMEZONE}时区)"
+                        print_status(f"下一次运行时间: {next_run_tz.strftime('%Y-%m-%d %H:%M:%S')} {timezone_info} (还有 {hours}小时 {minutes}分钟 {seconds}秒)", "计划", Fore.YELLOW)
+                    else:
+                        # 使用系统本地时间
+                        time_diff = next_run - datetime.now()
+                        hours, remainder = divmod(time_diff.seconds, 3600)
+                        minutes, seconds = divmod(remainder, 60)
+                        
+                        print_status(f"下一次运行时间: {next_run.strftime('%Y-%m-%d %H:%M:%S')} (系统本地时区) (还有 {hours}小时 {minutes}分钟 {seconds}秒)", "计划", Fore.YELLOW)
             
             time.sleep(1)  # 每秒检查一次
     except KeyboardInterrupt:

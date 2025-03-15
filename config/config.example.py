@@ -32,6 +32,7 @@ RSS_SOURCES = [
 
 # 定时任务配置
 SCHEDULE_TIME = "08:00"  # 每天运行的时间
+TIMEZONE = "Asia/Shanghai"  # 定时任务的时区设置，默认为中国标准时间
 
 # 文章生成配置
 MAX_ARTICLES_PER_RUN = 5  # 每次运行最多生成的文章数量 
