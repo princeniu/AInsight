@@ -213,6 +213,21 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
                         article_id = save_article_to_db(article)
                         print_status(f"文章已保存到数据库，ID: {article_id}", "完成", Fore.GREEN)
                         logger.info(f"文章已保存到数据库，ID: {article_id}")
+                        
+                        # 发送Telegram通知
+                        word_count = len(article_content.split())
+                        telegram.send_article_notification(
+                            title=article['title'],
+                            source=news['source'],
+                            file_path=md_path,
+                            word_count=word_count,
+                            model_used=model,
+                            content=article_content if telegram.include_preview else None
+                        )
+                        
+                        # 如果配置了发送完整文章
+                        if telegram and telegram.send_full_article:
+                            telegram.send_full_article(title=article['title'], content=article_content)
                     except Exception as e:
                         print_status(f"保存文章时出错: {str(e)}", "错误", Fore.RED)
                         logger.error(f"保存文章时出错: {str(e)}")

@@ -1,0 +1,6 @@
+{
+    "token": "YOUR_BOT_TOKEN",
+    "chat_id": "YOUR_CHAT_ID",
+    "include_preview": true,
+    "send_full_article": false
+} 
