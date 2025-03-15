@@ -69,6 +69,23 @@ class TelegramNotifier:
             logger.error(f"发送Telegram通知时出错: {str(e)}")
             return False
     
+    def _read_txt_file(self, file_path: str) -> Optional[str]:
+        """
+        读取纯文本文件内容
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            str: 文件内容，如果读取失败则返回None
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"读取文本文件时出错: {str(e)}")
+            return None
+    
     def send_article_notification(self, 
                                  title: str, 
                                  source: str, 
@@ -82,7 +99,7 @@ class TelegramNotifier:
         Args:
             title: 文章标题
             source: 新闻来源
-            file_path: 文件保存路径
+            file_path: 文件保存路径（txt文件路径）
             word_count: 文章字数
             model_used: 使用的模型名称
             content: 文章内容，默认为None
@@ -104,22 +121,37 @@ class TelegramNotifier:
         )
         
         # 如果提供了文章内容，添加内容预览
-        if content and self.include_preview:
-            # 截取前300个字符作为预览，避免消息过长
-            preview = content[:300] + ("..." if len(content) > 300 else "")
-            message += f"\n<b>📄 内容预览:</b>\n<i>{preview}</i>\n"
+        if self.include_preview:
+            # 优先使用传入的content参数
+            if content:
+                preview_content = content
+            # 如果没有传入content，尝试从txt文件读取
+            elif os.path.exists(file_path) and file_path.endswith('.txt'):
+                file_content = self._read_txt_file(file_path)
+                if file_content:
+                    preview_content = file_content
+                else:
+                    preview_content = None
+            else:
+                preview_content = None
+                
+            if preview_content:
+                # 截取前300个字符作为预览，避免消息过长
+                preview = preview_content[:300] + ("..." if len(preview_content) > 300 else "")
+                message += f"\n<b>📄 内容预览:</b>\n<i>{preview}</i>\n"
         
         message += "\n<i>文章已保存到本地和数据库</i>"
         
         return self.send_message(message)
 
-    def send_full_article(self, title: str, content: str) -> bool:
+    def send_full_article(self, title: str, content: str = None, file_path: str = None) -> bool:
         """
         发送完整文章内容
         
         Args:
             title: 文章标题
-            content: 文章完整内容
+            content: 文章完整内容，默认为None
+            file_path: 文本文件路径，如果content为None则从此文件读取内容
             
         Returns:
             bool: 发送成功返回True，否则返回False
@@ -129,6 +161,14 @@ class TelegramNotifier:
         max_length = 4000  # 留一些余量给标题和格式
         
         try:
+            # 如果没有提供content但提供了file_path，从文件读取内容
+            if content is None and file_path and os.path.exists(file_path):
+                content = self._read_txt_file(file_path)
+                
+            if not content:
+                logger.error("无法发送完整文章：内容为空")
+                return False
+                
             # 发送标题
             message = f"<b>📝 {title}</b>\n\n"
             self.send_message(message)

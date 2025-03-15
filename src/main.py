@@ -252,7 +252,10 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
                             
                             # 如果配置了发送完整文章
                             if telegram.send_full_article:
-                                telegram.send_full_article(title=article['title'], content=article_content)
+                                telegram.send_full_article(
+                                    title=article['title'], 
+                                    file_path=txt_path
+                                )
                                 
                             print_status(f"Telegram通知已发送", "完成", Fore.GREEN, verbose)
                     except Exception as e:
