@@ -1,0 +1,16 @@
+version: '3'
+
+services:
+  ai-news-scheduler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ai-news-scheduler
+    restart: unless-stopped
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../config:/app/config
+    environment:
+      - TZ=${TIMEZONE:-America/Chicago}
+    command: ["--model", "${MODEL:-gpt-4o}"] 

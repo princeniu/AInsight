@@ -28,8 +28,15 @@ wheels/
 venv/
 env/
 ENV/
-.env
 .venv
+
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
 
 # 日志文件
 *.log
@@ -42,12 +49,6 @@ logs/
 
 # 生成的文章目录（可选，取决于是否想要版本控制文章）
 articles/
-
-# 本地配置文件
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
 
 # IDE相关文件
 .idea/
@@ -63,4 +64,32 @@ openai_key.txt
 tmp/
 temp/
 .tmp/
-.temp/ 
+.temp/
+
+# Docker相关文件
+docker-compose.override.yml
+docker-compose.*.yml
+!docker-compose.yml
+!docker-compose.example.yml
+.docker/
+docker/data/
+docker-data/
+docker-volumes/
+.docker-sync/
+
+# Docker构建缓存
+.docker-cache/
+.dockerignore
+
+# Docker日志
+docker-logs/
+
+# Docker临时文件
+*.dockerignore.swp
+.docker-compose.yml.swp
+
+# Docker证书和密钥
+*.pem
+*.key
+*.crt
+docker/certs/ 

@@ -15,6 +15,10 @@
   - [运行程序](#运行程序)
   - [选择模型](#选择模型)
   - [可视化进度](#可视化进度)
+- [Docker部署](#docker部署)
+  - [使用Docker运行](#使用docker运行)
+  - [环境变量配置](#环境变量配置)
+  - [数据持久化](#数据持久化)
 - [模块说明](#模块说明)
 - [示例输出](#示例输出)
 - [故障排除](#故障排除)
@@ -61,6 +65,19 @@ ai_news_generator/
 ├── logs/                 # 日志文件目录
 │   ├── ai_news_generator.log # 主程序日志
 │   └── scheduler.log     # 定时任务日志
+├── docker/               # Docker部署相关文件
+│   ├── Dockerfile        # Docker镜像构建文件
+│   ├── docker-compose.yml # Docker Compose配置文件
+│   ├── .dockerignore     # Docker构建忽略文件
+│   ├── .env.example      # 环境变量示例文件
+│   ├── README.md         # Docker部署说明
+│   ├── config/           # Docker配置文件目录
+│   └── scripts/          # Docker相关脚本
+│       ├── start.sh      # 启动Docker容器
+│       ├── stop.sh       # 停止Docker容器
+│       ├── logs.sh       # 查看Docker日志
+│       ├── rebuild.sh    # 重建Docker镜像
+│       └── test.sh       # 测试Docker容器
 ├── tests/                # 测试代码目录
 │   └── test_news_sources.py # 新闻源测试
 ├── setup.py              # 安装脚本
@@ -313,6 +330,139 @@ python src/core/article_generator.py --verbose
    - 显示任务执行结果
 
 这些可视化功能使你能够更好地了解程序的运行状态，特别是在生成文章这样耗时的操作中，你可以实时看到进度而不是等待黑盒操作完成。
+
+## Docker部署
+
+本项目提供了Docker支持，使用Docker可以更简单地部署和运行定时任务，避免环境配置问题。所有Docker相关文件都集中在`docker/`目录下，便于管理和维护。
+
+### 使用Docker运行
+
+1. **确保已安装Docker和Docker Compose**
+
+   如果尚未安装，请参考[Docker官方文档](https://docs.docker.com/get-docker/)和[Docker Compose官方文档](https://docs.docker.com/compose/install/)。
+
+2. **配置文件准备**
+
+   确保已经创建并配置了`config/config.py`文件：
+   
+   ```bash
+   cp config/config.example.py config/config.py
+   # 然后编辑config/config.py，填入你的OpenAI API密钥和其他配置
+   ```
+
+3. **使用启动脚本运行**
+
+   我们提供了简便的启动脚本：
+   
+   ```bash
+   # 给脚本添加执行权限
+   chmod +x docker/scripts/*.sh
+   
+   # 启动服务
+   ./docker/scripts/start.sh
+   
+   # 查看日志
+   ./docker/scripts/logs.sh
+   
+   # 停止服务
+   ./docker/scripts/stop.sh
+   
+   # 重建Docker镜像
+   ./docker/scripts/rebuild.sh
+   
+   # 测试Docker容器
+   ./docker/scripts/test.sh
+   ```
+
+### 环境变量配置
+
+你可以通过复制并修改`docker/.env.example`文件来配置Docker环境变量：
+
+```bash
+cp docker/.env.example docker/.env
+```
+
+然后编辑`docker/.env`文件：
+
+```
+# 时区设置
+TIMEZONE=Asia/Shanghai
+
+# 使用的模型
+MODEL=gpt-4o
+```
+
+这些环境变量会覆盖`docker-compose.yml`中的默认值。
+
+### 数据持久化
+
+Docker配置已经设置了数据持久化，所有数据都会保存在本地的以下目录中：
+
+- `./data`：存储生成的文章和数据库
+- `./logs`：存储日志文件
+- `./config`：存储配置文件
+
+这意味着即使容器被删除，你的数据也不会丢失。
+
+### 自定义Docker配置
+
+如果需要自定义Docker配置，可以编辑`docker/Dockerfile`和`docker/docker-compose.yml`文件。
+
+#### 修改时区
+
+默认时区设置为`America/Chicago`，如果需要修改，可以在`docker/.env`文件中更改`TIMEZONE`变量。
+
+#### 修改使用的模型
+
+默认使用的模型为`gpt-4o`，如果需要修改，可以在`docker/.env`文件中更改`MODEL`变量。
+
+### Docker目录结构
+
+```
+docker/
+├── Dockerfile            # Docker镜像构建文件
+├── docker-compose.yml    # Docker Compose配置文件
+├── .dockerignore         # Docker构建忽略文件
+├── .env.example          # 环境变量示例文件
+├── README.md             # Docker部署说明
+├── config/               # Docker配置文件目录
+└── scripts/              # Docker相关脚本
+    ├── start.sh          # 启动Docker容器
+    ├── stop.sh           # 停止Docker容器
+    ├── logs.sh           # 查看Docker日志
+    ├── rebuild.sh        # 重建Docker镜像
+    └── test.sh           # 测试Docker容器
+```
+
+### 常见问题
+
+1. **容器无法启动**
+
+   检查日志以获取详细错误信息：
+   
+   ```bash
+   ./docker/scripts/logs.sh
+   ```
+
+2. **OpenAI API调用失败**
+
+   确保在`config/config.py`中正确配置了API密钥，并且API密钥有效。
+
+3. **时区问题**
+
+   如果遇到时区问题，可以尝试在`docker/.env`文件中修改`TIMEZONE`变量。
+
+4. **文件权限问题**
+
+   如果遇到文件权限问题，可以尝试以下命令：
+   
+   ```bash
+   # 确保脚本有执行权限
+   chmod +x docker/scripts/*.sh
+   
+   # 确保数据目录有正确的权限
+   chmod -R 755 data logs
+   ```
 
 ## 模块说明
 
