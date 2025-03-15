@@ -23,7 +23,7 @@ colorama.init()
 
 # 导入配置
 try:
-    from config import OPENAI_API_KEY, MODEL_CONFIG
+    from config.config import OPENAI_API_KEY, MODEL_CONFIG
     logger = logging.getLogger(__name__)
     logger.info("已从config.py加载API密钥和模型配置")
     # 获取默认模型

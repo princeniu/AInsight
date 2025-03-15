@@ -284,9 +284,25 @@ def check_news_exists(title: str, source_url: str = None) -> bool:
         如果新闻已存在返回True，否则返回False
     """
     try:
+        # 确保database目录存在
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        
         # 连接到数据库
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        
+        # 创建表（如果不存在）
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_url TEXT,
+            published_date TEXT,
+            model_used TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
         
         # 首先检查标题是否完全匹配
         cursor.execute('SELECT COUNT(*) FROM articles WHERE title = ?', (title,))

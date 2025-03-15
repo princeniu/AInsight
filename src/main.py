@@ -25,6 +25,7 @@ from src.core.news_fetcher import fetch_news
 from src.core.news_filter import filter_news
 from src.core.article_generator import generate_article, get_available_models
 from src.storage.article_storage import save_article_to_markdown, save_article_to_db
+from src.utils.telegram_notifier import TelegramNotifier  # 导入Telegram通知模块
 
 # 导入配置
 try:
@@ -114,6 +115,13 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
     if max_articles is None:
         max_articles = MAX_ARTICLES_PER_RUN
     
+    # 初始化Telegram通知器
+    telegram = TelegramNotifier.from_config()
+    if telegram and verbose:
+        print_status("Telegram通知功能已启用", "信息", Fore.CYAN)
+    elif verbose:
+        print_status("Telegram通知功能未启用，请检查配置文件", "警告", Fore.YELLOW)
+    
     start_time = time.time()
     
     # 打印标题
@@ -173,6 +181,11 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
     # 限制文章数量
     filtered_news = filtered_news[:max_articles]
     
+    # 用于记录使用的模型
+    models_used = []
+    if model and model not in models_used:
+        models_used.append(model or DEFAULT_MODEL)
+    
     # 生成文章
     articles = []
     with tqdm(total=len(filtered_news), desc="文章生成总进度", ncols=100, disable=not verbose) as pbar:
@@ -182,7 +195,8 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
             
             try:
                 # 生成文章
-                print_status(f"正在使用模型 {model or DEFAULT_MODEL} 生成文章 (尝试 1/3)", "生成", Fore.YELLOW)
+                current_model = model or DEFAULT_MODEL
+                print_status(f"正在使用模型 {current_model} 生成文章 (尝试 1/3)", "生成", Fore.YELLOW)
                 print_status(f"文章标题: {news['title']}", "标题", Fore.CYAN)
                 article_content = generate_article(news, model=model, verbose=verbose)
                 
@@ -193,9 +207,13 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
                         "content": article_content,
                         "source_url": news["link"],
                         "published_date": news["published_date"],
-                        "model_used": model or DEFAULT_MODEL
+                        "model_used": current_model
                     }
                     articles.append(article)
+                    
+                    # 记录使用的模型
+                    if current_model not in models_used:
+                        models_used.append(current_model)
                     
                     # 步骤4: 存储文章
                     print_status(f"存储文章: {article['title']}", "步骤4", Fore.BLUE)
@@ -215,19 +233,28 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
                         logger.info(f"文章已保存到数据库，ID: {article_id}")
                         
                         # 发送Telegram通知
-                        word_count = len(article_content.split())
-                        telegram.send_article_notification(
-                            title=article['title'],
-                            source=news['source'],
-                            file_path=md_path,
-                            word_count=word_count,
-                            model_used=model,
-                            content=article_content if telegram.include_preview else None
-                        )
-                        
-                        # 如果配置了发送完整文章
-                        if telegram and telegram.send_full_article:
-                            telegram.send_full_article(title=article['title'], content=article_content)
+                        if telegram:
+                            # 修改字符数统计方法，使其更准确地反映文章的实际内容长度
+                            # 去除空格、换行符等非内容字符，只计算实际文本内容的字符数
+                            cleaned_content = ''.join(article_content.split())
+                            char_count = len(cleaned_content)
+                            print_status(f"发送Telegram通知...", "通知", Fore.CYAN, verbose)
+                            
+                            # 发送文章生成通知
+                            telegram.send_article_notification(
+                                title=article['title'],
+                                source=news['source'],
+                                file_path=txt_path,
+                                word_count=char_count,
+                                model_used=current_model,
+                                content=article_content if telegram.include_preview else None
+                            )
+                            
+                            # 如果配置了发送完整文章
+                            if telegram.send_full_article:
+                                telegram.send_full_article(title=article['title'], content=article_content)
+                                
+                            print_status(f"Telegram通知已发送", "完成", Fore.GREEN, verbose)
                     except Exception as e:
                         print_status(f"保存文章时出错: {str(e)}", "错误", Fore.RED)
                         logger.error(f"保存文章时出错: {str(e)}")
@@ -249,6 +276,16 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
     print("=" * 60 + "\n")
     
     logger.info(f"AI热点新闻自动化采集与文章生成完成，耗时: {elapsed_time:.2f}秒")
+    
+    # 发送批量处理完成通知
+    if telegram and filtered_news:
+        telegram.send_batch_notification(
+            total_fetched=len(news_list),
+            total_filtered=len(filtered_news),
+            total_generated=len(articles),
+            models_used=models_used,
+            execution_time=elapsed_time
+        )
 
 
 if __name__ == "__main__":

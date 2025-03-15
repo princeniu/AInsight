@@ -16,7 +16,7 @@ from dateutil import parser as date_parser
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-from article_storage import check_news_exists  # 导入新函数
+from src.storage.article_storage import check_news_exists  # 导入新函数
 
 # 配置日志
 logger = logging.getLogger(__name__)

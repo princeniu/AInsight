@@ -98,7 +98,7 @@ class TelegramNotifier:
             f"<b>🎉 文章生成完成</b>\n\n"
             f"<b>📝 标题:</b> {title}\n"
             f"<b>🔍 来源:</b> {source}\n"
-            f"<b>📊 字数:</b> {word_count}\n"
+            f"<b>📊 字符数:</b> {word_count}\n"
             f"<b>🤖 模型:</b> {model_used}\n"
             f"<b>💾 文件名:</b> {file_name}\n"
         )

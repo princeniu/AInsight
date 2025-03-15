@@ -21,6 +21,9 @@ from colorama import Fore, Style
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
+# 导入自定义模块
+from src.utils.telegram_notifier import TelegramNotifier  # 导入Telegram通知模块
+
 # 导入配置
 try:
     from config.config import SCHEDULE_TIME, MODEL_CONFIG
@@ -46,6 +49,9 @@ logger = logging.getLogger(__name__)
 # 获取项目根目录
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 MAIN_SCRIPT = os.path.join(ROOT_DIR, "src", "main.py")
+
+# 初始化Telegram通知器
+telegram = TelegramNotifier.from_config()
 
 
 def parse_arguments():
@@ -97,6 +103,18 @@ def run_task(model=None, verbose=False):
     print_status(f"开始执行定时任务 (使用模型: {model})", "开始", Fore.GREEN)
     logger.info(f"开始执行定时任务 (使用模型: {model})")
     
+    # 发送Telegram通知：任务开始
+    if telegram:
+        start_message = (
+            f"<b>🔄 定时任务开始执行</b>\n\n"
+            f"<b>⏰ 开始时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"<b>🤖 使用模型:</b> {model}\n\n"
+            f"<i>任务正在执行中，完成后将发送结果通知...</i>"
+        )
+        telegram.send_message(start_message)
+        if verbose:
+            print_status("已发送Telegram开始通知", "通知", Fore.CYAN)
+    
     try:
         # 构建命令参数
         cmd = [sys.executable, MAIN_SCRIPT, "--model", model]
@@ -132,6 +150,18 @@ def run_task(model=None, verbose=False):
             print("-" * 60)
             print_status("任务执行成功", "成功", Fore.GREEN)
             logger.info("任务执行成功")
+            
+            # 发送Telegram通知：任务成功
+            if telegram:
+                success_message = (
+                    f"<b>✅ 定时任务执行成功</b>\n\n"
+                    f"<b>⏰ 完成时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"<b>🤖 使用模型:</b> {model}\n\n"
+                    f"<i>文章已生成并保存，详细结果请查看主程序通知</i>"
+                )
+                telegram.send_message(success_message)
+                if verbose:
+                    print_status("已发送Telegram成功通知", "通知", Fore.CYAN)
         else:
             print("-" * 60)
             print_status(f"任务执行失败，返回码: {process.returncode}", "失败", Fore.RED)
@@ -139,6 +169,26 @@ def run_task(model=None, verbose=False):
             
             # 显示错误输出
             stderr_output = process.stderr.read()
+            
+            # 发送Telegram通知：任务失败
+            if telegram:
+                error_message = (
+                    f"<b>❌ 定时任务执行失败</b>\n\n"
+                    f"<b>⏰ 失败时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"<b>🤖 使用模型:</b> {model}\n"
+                    f"<b>📋 返回码:</b> {process.returncode}\n\n"
+                )
+                
+                if stderr_output:
+                    # 截取错误输出的前300个字符
+                    error_preview = stderr_output[:300] + ("..." if len(stderr_output) > 300 else "")
+                    error_message += f"<b>🔍 错误信息:</b>\n<pre>{error_preview}</pre>\n\n"
+                
+                error_message += "<i>请检查日志文件获取详细错误信息</i>"
+                telegram.send_message(error_message)
+                if verbose:
+                    print_status("已发送Telegram失败通知", "通知", Fore.CYAN)
+            
             if stderr_output:
                 print_status("错误输出:", "错误", Fore.RED)
                 print(stderr_output)
@@ -146,6 +196,19 @@ def run_task(model=None, verbose=False):
     except Exception as e:
         print_status(f"运行任务时出错: {str(e)}", "错误", Fore.RED)
         logger.error(f"运行任务时出错: {str(e)}", exc_info=True)
+        
+        # 发送Telegram通知：任务异常
+        if telegram:
+            exception_message = (
+                f"<b>⚠️ 定时任务执行异常</b>\n\n"
+                f"<b>⏰ 异常时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"<b>🤖 使用模型:</b> {model}\n"
+                f"<b>🔍 异常信息:</b> {str(e)}\n\n"
+                f"<i>请检查日志文件获取详细错误信息</i>"
+            )
+            telegram.send_message(exception_message)
+            if verbose:
+                print_status("已发送Telegram异常通知", "通知", Fore.CYAN)
     
     print_status("定时任务执行完毕", "完成", Fore.GREEN)
     logger.info("定时任务执行完毕")
@@ -167,6 +230,19 @@ def setup_schedule(model=None, verbose=False):
     schedule.every().day.at(SCHEDULE_TIME).do(scheduled_task)
     print_status(f"已设置定时任务: 每天{SCHEDULE_TIME}运行 (使用模型: {model})", "设置", Fore.GREEN)
     logger.info(f"已设置定时任务: 每天{SCHEDULE_TIME}运行 (使用模型: {model})")
+    
+    # 发送Telegram通知：定时器启动
+    if telegram:
+        schedule_message = (
+            f"<b>🕒 AI新闻自动化定时器已启动</b>\n\n"
+            f"<b>📅 执行计划:</b> 每天 {SCHEDULE_TIME}\n"
+            f"<b>🤖 使用模型:</b> {model}\n"
+            f"<b>📊 详细输出:</b> {'开启' if verbose else '关闭'}\n\n"
+            f"<i>定时器将按计划自动执行任务</i>"
+        )
+        telegram.send_message(schedule_message)
+        if verbose:
+            print_status("已发送Telegram定时器启动通知", "通知", Fore.CYAN)
     
     # 解析配置的时间
     try:
@@ -234,6 +310,10 @@ def main():
     print(f"使用模型: {Fore.GREEN}{model}{Style.RESET_ALL}")
     print(f"定时执行时间: {Fore.GREEN}{SCHEDULE_TIME}{Style.RESET_ALL}")
     print(f"显示详细进度: {Fore.GREEN}{verbose}{Style.RESET_ALL}")
+    if telegram:
+        print(f"Telegram通知: {Fore.GREEN}已启用{Style.RESET_ALL}")
+    else:
+        print(f"Telegram通知: {Fore.YELLOW}未启用{Style.RESET_ALL}")
     print("=" * 60 + "\n")
     
     logger.info(f"AI热点新闻自动化采集与文章生成定时器已启动 (使用模型: {model})")
@@ -274,9 +354,33 @@ def main():
     except KeyboardInterrupt:
         print_status("定时任务已手动停止", "停止", Fore.YELLOW)
         logger.info("定时任务已手动停止")
+        
+        # 发送Telegram通知：定时器停止
+        if telegram:
+            stop_message = (
+                f"<b>🛑 AI新闻自动化定时器已停止</b>\n\n"
+                f"<b>⏰ 停止时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"<b>📋 停止原因:</b> 用户手动停止\n\n"
+                f"<i>定时器已停止运行，需要手动重启</i>"
+            )
+            telegram.send_message(stop_message)
+            if verbose:
+                print_status("已发送Telegram定时器停止通知", "通知", Fore.CYAN)
     except Exception as e:
         print_status(f"定时任务循环出错: {str(e)}", "错误", Fore.RED)
         logger.error(f"定时任务循环出错: {str(e)}", exc_info=True)
+        
+        # 发送Telegram通知：定时器异常
+        if telegram:
+            error_message = (
+                f"<b>⚠️ AI新闻自动化定时器异常</b>\n\n"
+                f"<b>⏰ 异常时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"<b>🔍 异常信息:</b> {str(e)}\n\n"
+                f"<i>定时器已停止运行，请检查日志并手动重启</i>"
+            )
+            telegram.send_message(error_message)
+            if verbose:
+                print_status("已发送Telegram定时器异常通知", "通知", Fore.CYAN)
 
 
 if __name__ == "__main__":
