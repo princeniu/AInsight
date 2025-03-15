@@ -83,6 +83,26 @@ def parse_arguments():
     parser.add_argument("--max-sources", type=int, default=None,
                         help="每种类型的最大源数量 (默认: 不限制)")
     
+    # 添加配置文件参数
+    parser.add_argument("--config", type=str, default="config/config.py",
+                        help="配置文件路径 (默认: config/config.py)")
+    
+    # 添加Telegram通知参数
+    parser.add_argument("--no-telegram", action="store_true",
+                        help="禁用Telegram通知")
+    
+    # 添加不保存文章参数
+    parser.add_argument("--no-save", action="store_true",
+                        help="不保存生成的文章")
+    
+    # 添加风格参数
+    parser.add_argument("--style", type=int, 
+                        help="指定使用的文章风格 (1-4), 不指定则自动选择")
+    
+    # 添加历史记录大小参数
+    parser.add_argument("--history-size", type=int, default=None,
+                        help="记录的历史风格数量，用于避免连续使用相同风格")
+    
     return parser.parse_args()
 
 
@@ -198,7 +218,18 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
                 current_model = model or DEFAULT_MODEL
                 print_status(f"正在使用模型 {current_model} 生成文章 (尝试 1/3)", "生成", Fore.YELLOW)
                 print_status(f"文章标题: {news['title']}", "标题", Fore.CYAN)
-                article_content = generate_article(news, model=model, verbose=verbose)
+                
+                # 如果命令行指定了风格，则使用指定的风格
+                specific_style = args.style if hasattr(args, 'style') else None
+                
+                # 如果命令行指定了历史记录大小，则设置历史记录大小
+                if hasattr(args, 'history_size') and args.history_size is not None:
+                    from src.core.article_generator import MAX_STYLE_HISTORY
+                    MAX_STYLE_HISTORY = args.history_size
+                    if verbose:
+                        print_status(f"设置历史风格记录数量为: {MAX_STYLE_HISTORY}", "配置", Fore.BLUE)
+                
+                article_content = generate_article(news, model=model, verbose=verbose, specific_style=specific_style)
                 
                 if article_content:
                     # 创建文章对象
@@ -207,7 +238,8 @@ def main(model: str = None, max_articles: int = None, verbose: bool = False):
                         "content": article_content,
                         "source_url": news["link"],
                         "published_date": news["published_date"],
-                        "model_used": current_model
+                        "model_used": current_model,
+                        "source_name": news["source"]
                     }
                     articles.append(article)
                     

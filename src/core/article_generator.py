@@ -11,15 +11,22 @@ import os
 import logging
 import json
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import openai
 from openai import OpenAI
 from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
+import random  # 添加random模块导入
 
 # 初始化colorama
 colorama.init()
+
+# 记录最近使用的风格索引，使用一个列表来存储
+# 默认记录最近3种风格，如果风格总数少于3，则记录所有风格
+RECENT_USED_STYLES: List[int] = []
+# 最大记录的历史风格数量
+MAX_STYLE_HISTORY = 3
 
 # 导入配置
 try:
@@ -48,16 +55,25 @@ except TypeError as e:
     else:
         raise
 
-# 文章生成提示模板
-ARTICLE_PROMPT_TEMPLATE = """
-你是一位专业的AI领域科技记者，需要根据以下新闻信息撰写一篇今日头条平台的爆款文章。
+# 文章生成提示模板 - 基础模板
+ARTICLE_PROMPT_TEMPLATE_BASE = """
+你是一位专业的AI领域科技记者，需要根据以下新闻信息撰写一篇文章。
 
 新闻标题: {title}
 新闻摘要: {summary}
 新闻链接: {link}
 发布日期: {published_date}
 
-请按照以下要求撰写文章:
+{style_instructions}
+
+请直接输出完整的文章内容，不需要包含任何额外的说明。确保文章风格符合要求，能够吸引大量阅读和分享。
+"""
+
+# 定义多种文章风格
+ARTICLE_STYLES = [
+    # 风格1: 今日头条爆款风格
+    """
+请按照以下要求撰写一篇今日头条平台的爆款文章:
 
 1. 文章结构:
    - 标题：使用爆款标题公式，如"震惊！"、"重磅！"、"突发！"等开头，或使用数字清单、悬念设问、对比反差等吸引眼球的形式
@@ -89,10 +105,116 @@ ARTICLE_PROMPT_TEMPLATE = """
    - 争议性：适当加入一些有争议的观点，引发讨论
    - 时效性：强调新闻的紧迫性和重要性
    - 故事性：将枯燥的技术新闻转化为有趣的故事
+""",
 
-请直接输出完整的文章内容，不需要包含任何额外的说明。确保文章风格符合今日头条平台的爆款特点，能够吸引大量阅读和分享。
+    # 风格2: 知乎专业分析风格
+    """
+请按照以下要求撰写一篇知乎平台的专业分析文章:
+
+1. 文章结构:
+   - 标题：使用"深度分析"、"全面解读"、"X个角度看"等专业表述
+   - 开头：简明扼要地概述新闻背景和核心要点
+   - 正文：分为3-5个明确的部分，每部分深入分析一个方面
+   - 分段：逻辑清晰，段落之间有明确的过渡
+   - 小标题：使用客观、专业的小标题，如"技术原理"、"市场影响"、"未来展望"等
+   - 结尾：总结观点并提出前瞻性思考
+
+2. 文章风格:
+   - 长度：1200-1800字
+   - 语气：专业、客观、理性
+   - 排版：使用引用、列表等形式增强可读性
+   - 论证：提供数据、案例和逻辑推理支持观点
+   - 参考：适当引用行业报告或专家观点增加可信度
+
+3. 内容要求:
+   - 避免过度情绪化表达，保持客观分析
+   - 提供多角度思考，不偏向单一立场
+   - 解释技术原理时深入浅出，但不失专业性
+   - 分析技术对行业、市场和社会的影响
+   - 对比类似技术或产品，突出特点和差异
+   - 指出潜在的问题、挑战和局限性
+
+4. 专业要素:
+   - 术语准确：正确使用AI领域的专业术语
+   - 背景补充：提供必要的背景知识和发展脉络
+   - 深度思考：超越表面现象，探讨深层次影响
+   - 前瞻视角：分析技术未来可能的发展方向
+   - 实用价值：提供读者可以实际应用的见解
+   - 理性批判：在肯定成就的同时不回避问题
+""",
+
+    # 风格3: 微信公众号科普风格
+    """
+请按照以下要求撰写一篇微信公众号的科普文章:
+
+1. 文章结构:
+   - 标题：简洁明了，使用"一文读懂"、"科普"、"你需要知道的"等表述
+   - 开头：以一个有趣的问题或生活场景引入话题
+   - 正文：由浅入深，循序渐进地解释概念和原理
+   - 分段：段落简短清晰，每个段落聚焦一个要点
+   - 小标题：使用问答式或概念式小标题，如"什么是X?"、"X的工作原理"等
+   - 结尾：总结要点并展望未来应用
+
+2. 文章风格:
+   - 长度：1000-1500字
+   - 语气：友好、平易近人，像老师讲课
+   - 排版：使用图文并茂的形式，插入表情符号增加亲和力
+   - 解释：使用类比和比喻解释复杂概念
+   - 互动：适当设置思考问题，增加读者参与感
+
+3. 内容要求:
+   - 从零基础读者角度出发，避免假设读者已有专业知识
+   - 将复杂技术概念转化为日常生活中的类比
+   - 解释术语时给出通俗易懂的定义
+   - 强调技术在日常生活中的实际应用
+   - 澄清常见的误解和疑问
+   - 提供进一步学习的资源和建议
+
+4. 科普要素:
+   - 准确性：确保科学和技术信息的准确性
+   - 趣味性：通过故事、案例和趣闻增加阅读乐趣
+   - 实用性：读者阅读后能获得实用知识
+   - 启发性：激发读者对科技的兴趣和思考
+   - 通俗性：复杂概念简单化，专业术语通俗化
+   - 时代性：结合当下热点，增强时代感和共鸣
+""",
+
+    # 风格4: 商业分析报告风格
+    """
+请按照以下要求撰写一篇商业分析报告风格的文章:
+
+1. 文章结构:
+   - 标题：简洁专业，包含关键技术和商业价值
+   - 摘要：在开头提供200字以内的执行摘要，概述关键点
+   - 正文：分为市场分析、技术评估、商业影响、风险分析等部分
+   - 分段：每个部分有明确的小标题和结构化内容
+   - 数据支持：适当引用市场数据、增长预测等量化信息
+   - 结论：提供明确的商业洞见和战略建议
+
+2. 文章风格:
+   - 长度：1200-1800字
+   - 语气：专业、客观、分析性强
+   - 排版：使用要点列表、表格等商业报告常用格式
+   - 论证：基于数据和市场趋势进行分析
+   - 视角：从投资者、企业决策者的角度评估价值
+
+3. 内容要求:
+   - 分析技术创新对市场格局的影响
+   - 评估技术的商业可行性和盈利模式
+   - 分析潜在的市场规模和增长预期
+   - 识别主要竞争对手和市场差异化因素
+   - 讨论实施过程中可能面临的挑战
+   - 提供基于SWOT分析的战略建议
+
+4. 商业要素:
+   - 市场洞察：揭示市场趋势和机会
+   - 竞争分析：评估竞争格局和差异化策略
+   - 价值主张：明确技术的独特价值和优势
+   - 风险评估：识别潜在风险和缓解策略
+   - 投资视角：分析投资价值和回报预期
+   - 行动建议：提供具体可行的下一步行动
 """
-
+]
 
 def print_status(message, status="信息", color=Fore.BLUE):
     """
@@ -108,7 +230,8 @@ def print_status(message, status="信息", color=Fore.BLUE):
     print(f"[{timestamp}] {status_text} {message}")
 
 
-def generate_article(news: Dict[str, Any], model: str = None, max_retries: int = 3, verbose: bool = False) -> Optional[str]:
+def generate_article(news: Dict[str, Any], model: str = None, max_retries: int = 3, verbose: bool = False, 
+                    specific_style: int = None) -> Optional[str]:
     """
     使用OpenAI模型生成文章
     
@@ -117,10 +240,13 @@ def generate_article(news: Dict[str, Any], model: str = None, max_retries: int =
         model: 要使用的模型名称，如果为None则使用默认模型
         max_retries: 最大重试次数
         verbose: 是否显示详细进度
+        specific_style: 指定使用的风格索引（从1开始），如果为None则自动选择
         
     Returns:
         生成的文章内容，如果生成失败则返回None
     """
+    global RECENT_USED_STYLES  # 声明使用全局变量
+    
     if not OPENAI_API_KEY:
         if verbose:
             print_status("未设置API密钥，请在config.py中设置OPENAI_API_KEY", "错误", Fore.RED)
@@ -131,12 +257,77 @@ def generate_article(news: Dict[str, Any], model: str = None, max_retries: int =
     if model is None:
         model = DEFAULT_MODEL
     
+    total_styles = len(ARTICLE_STYLES)
+    
+    # 如果指定了特定风格
+    if specific_style is not None:
+        # 将用户输入的1-based索引转换为0-based
+        style_index = specific_style - 1
+        
+        # 检查索引是否有效
+        if style_index < 0 or style_index >= total_styles:
+            if verbose:
+                print_status(f"指定的风格索引 {specific_style} 无效，有效范围: 1-{total_styles}", "错误", Fore.RED)
+            logger.error(f"指定的风格索引 {specific_style} 无效，有效范围: 1-{total_styles}")
+            # 回退到自动选择
+            specific_style = None
+        else:
+            if verbose:
+                print_status(f"使用指定的文章风格 {specific_style}", "风格", Fore.CYAN)
+            logger.info(f"使用指定的文章风格 {specific_style}")
+    
+    # 如果没有指定特定风格或指定的风格无效，则自动选择
+    if specific_style is None:
+        # 确定历史记录长度不超过风格总数-1（至少要留一个可选）
+        history_size = min(MAX_STYLE_HISTORY, total_styles - 1) if total_styles > 1 else 0
+        
+        # 获取所有可用的风格索引
+        available_styles = list(range(total_styles))
+        
+        # 如果有历史记录且风格数量大于1，则排除最近使用的风格
+        if RECENT_USED_STYLES and total_styles > 1:
+            # 从可用风格中移除最近使用的风格
+            for style_idx in RECENT_USED_STYLES:
+                if style_idx in available_styles:
+                    available_styles.remove(style_idx)
+        
+        # 如果所有风格都被使用过（极端情况），则使用除最近一次外的任意风格
+        if not available_styles and total_styles > 1:
+            available_styles = list(range(total_styles))
+            if RECENT_USED_STYLES:
+                most_recent_style = RECENT_USED_STYLES[0]
+                available_styles.remove(most_recent_style)
+        
+        # 从剩余的风格中随机选择一个
+        style_index = random.choice(available_styles)
+        
+        if verbose:
+            print_status(f"自动选择文章风格 {style_index + 1}（避免最近使用的风格）", "风格", Fore.CYAN)
+        logger.info(f"自动选择文章风格 {style_index + 1}（避免最近使用的风格）")
+    
+    # 更新最近使用的风格历史
+    RECENT_USED_STYLES.insert(0, style_index)  # 在列表开头插入新使用的风格
+    # 保持历史记录不超过指定长度
+    if len(RECENT_USED_STYLES) > MAX_STYLE_HISTORY:
+        RECENT_USED_STYLES = RECENT_USED_STYLES[:MAX_STYLE_HISTORY]
+    
+    style_instructions = ARTICLE_STYLES[style_index]
+    
+    if verbose and RECENT_USED_STYLES:
+        recent_styles_str = ", ".join([str(idx + 1) for idx in RECENT_USED_STYLES])
+        print_status(f"最近使用的风格: {recent_styles_str}", "历史", Fore.CYAN)
+    
+    if RECENT_USED_STYLES:
+        recent_styles_str = ", ".join([str(idx + 1) for idx in RECENT_USED_STYLES])
+        logger.info(f"最近使用的风格历史: {recent_styles_str}")
+    
     # 准备提示内容
-    prompt = ARTICLE_PROMPT_TEMPLATE.format(
+    prompt = ARTICLE_PROMPT_TEMPLATE_BASE.format(
         title=news.get("title", ""),
         summary=news.get("summary", ""),
         link=news.get("link", ""),
-        published_date=news.get("published_date", "")
+        published_date=news.get("published_date", ""),
+        style_instructions=style_instructions
     )
     
     # 重试机制
@@ -157,7 +348,7 @@ def generate_article(news: Dict[str, Any], model: str = None, max_retries: int =
             response = client.chat.completions.create(
                 model=model,  # 使用指定的模型
                 messages=[
-                    {"role": "system", "content": "你是一位专业的AI领域科技记者，擅长撰写今日头条平台的爆款文章。你的文章充满情绪化表达、悬念设置和互动元素，能引发大量阅读、点赞和分享。你善于将复杂的AI技术用通俗易懂的方式解释，并添加大量表情符号增加亲和力。"},
+                    {"role": "system", "content": "你是一位专业的AI领域科技记者，擅长撰写社交媒体平台的爆款文章。你的文章充满情绪化表达、悬念设置和互动元素，能引发大量阅读、点赞和分享。你善于将复杂的AI技术用通俗易懂的方式解释。"},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.8,  # 控制创造性
@@ -337,7 +528,17 @@ if __name__ == "__main__":
                         help=f"要使用的OpenAI模型 (默认: {DEFAULT_MODEL})")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="显示详细的进度信息")
+    parser.add_argument("--style", type=int, 
+                        help=f"指定使用的文章风格 (1-{len(ARTICLE_STYLES)}), 不指定则自动选择")
+    parser.add_argument("--history-size", type=int, default=MAX_STYLE_HISTORY,
+                        help=f"记录的历史风格数量 (默认: {MAX_STYLE_HISTORY})")
     args = parser.parse_args()
+    
+    # 设置历史记录大小
+    if args.history_size is not None and args.history_size >= 0:
+        MAX_STYLE_HISTORY = args.history_size
+        if args.verbose:
+            print_status(f"设置历史风格记录数量为: {MAX_STYLE_HISTORY}", "配置", Fore.BLUE)
     
     # 测试数据
     test_news = {
@@ -354,6 +555,25 @@ if __name__ == "__main__":
     print(f"默认模型: {Fore.GREEN}{DEFAULT_MODEL}{Style.RESET_ALL}")
     print(f"当前使用模型: {Fore.GREEN}{args.model}{Style.RESET_ALL}")
     print(f"显示详细进度: {Fore.GREEN}{args.verbose}{Style.RESET_ALL}")
+    print(f"历史风格记录数量: {Fore.GREEN}{MAX_STYLE_HISTORY}{Style.RESET_ALL}")
+    
+    # 打印可用的风格
+    print("\n可用的文章风格:")
+    for i, style in enumerate(ARTICLE_STYLES):
+        style_name = f"风格 {i+1}"
+        if i == 0:
+            style_name += " (今日头条爆款风格)"
+        elif i == 1:
+            style_name += " (知乎专业分析风格)"
+        elif i == 2:
+            style_name += " (微信公众号科普风格)"
+        elif i == 3:
+            style_name += " (商业分析报告风格)"
+        print(f"{Fore.CYAN}{style_name}{Style.RESET_ALL}")
+    
+    if args.style:
+        print(f"指定使用风格: {Fore.GREEN}{args.style}{Style.RESET_ALL}")
+    
     print("=" * 60 + "\n")
     
     # 测试优化标题
@@ -363,7 +583,7 @@ if __name__ == "__main__":
     
     # 测试生成文章
     print_status("开始测试文章生成", "测试", Fore.BLUE)
-    article = generate_article(test_news, model=args.model, verbose=args.verbose)
+    article = generate_article(test_news, model=args.model, verbose=args.verbose, specific_style=args.style)
     
     if article:
         print_status("文章生成成功", "成功", Fore.GREEN)

@@ -104,13 +104,17 @@ def save_article_to_markdown(article_data: Dict[str, Any]) -> tuple[str, str]:
     # 准备Markdown内容
     model_info = f"模型: {article_data.get('model_used', 'unknown')}" if 'model_used' in article_data else ""
     
+    # 添加来源信息
+    source_name = article_data.get("source_name", "未知来源")
+    source_info = f"\n\n---\n\n**来源：{source_name}**"
+    
     markdown_content = f"""# {article_data['title']}
 
 📅 {article_data['published_date']}  
 🔗 [阅读原文]({article_data['source_url']})  
 {model_info}
 
-{article_data['content']}
+{article_data['content']}{source_info}
 """
     
     # 准备纯文本内容
@@ -121,6 +125,10 @@ def save_article_to_markdown(article_data: Dict[str, Any]) -> tuple[str, str]:
 {model_info}
 
 {clean_text_content(article_data['content'])}
+
+---
+
+来源：{source_name}
 """
     
     try:
