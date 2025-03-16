@@ -67,6 +67,7 @@ def clean_text_content(text: str) -> str:
     """
     # 1. 移除特定的Markdown标记符号
     text = re.sub(r'\*\*', '', text)  # 移除加粗标记 **
+    text = re.sub(r'\*', '', text)  # 移除斜体标记 *
     text = re.sub(r'---+', '', text)  # 移除分隔线 ---
     text = re.sub(r'###\s+', '', text)  # 移除三级标题标记
     text = re.sub(r'##\s+', '', text)  # 移除二级标题标记
