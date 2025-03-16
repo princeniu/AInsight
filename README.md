@@ -19,6 +19,8 @@
   - [使用Docker运行](#使用docker运行)
   - [环境变量配置](#环境变量配置)
   - [数据持久化](#数据持久化)
+  - [定时任务配置](#定时任务配置)
+  - [常见问题排除](#常见问题排除)
 - [模块说明](#模块说明)
 - [示例输出](#示例输出)
 - [故障排除](#故障排除)
@@ -32,13 +34,15 @@
 1. **多源新闻获取**：从多个AI资讯来源（RSS、网站爬虫、API）获取最新新闻
 2. **智能筛选**：通过关键词过滤、去重和热度排序筛选高质量新闻
 3. **AI文章生成**：调用OpenAI模型自动生成结构清晰、可读性强的文章
-4. **多格式存储**：将生成的文章保存为Markdown文件和纯文本文件，并存入SQLite数据库
-5. **定时执行**：支持每天定时自动运行
-6. **模型选择**：支持选择不同的OpenAI模型来生成文章
-7. **可视化进度**：提供彩色输出和进度条，实时显示程序执行状态
-8. **数据库查重**：自动检查新闻是否已存在于数据库中，避免重复生成文章
-9. **智能文本清理**：针对性去除Markdown格式符号，生成干净的纯文本版本
-10. **Telegram通知**：通过Telegram机器人实时通知文章生成状态和结果
+4. **多风格文章生成**：支持多种文章风格，避免连续文章风格重复
+5. **多格式存储**：将生成的文章保存为Markdown文件和纯文本文件，并存入SQLite数据库
+6. **定时执行**：支持每天定时自动运行，可配置是否在首次启动时立即执行
+7. **模型选择**：支持选择不同的OpenAI模型来生成文章
+8. **可视化进度**：提供彩色输出和进度条，实时显示程序执行状态
+9. **数据库查重**：自动检查新闻是否已存在于数据库中，避免重复生成文章
+10. **智能文本清理**：针对性去除Markdown格式符号，生成干净的纯文本版本
+11. **Telegram通知**：通过Telegram机器人实时通知文章生成状态和结果
+12. **Docker支持**：提供完整的Docker部署方案，支持不同的启动模式
 
 ## 项目结构
 
@@ -71,13 +75,13 @@ ai_news_generator/
 │   ├── .dockerignore     # Docker构建忽略文件
 │   ├── .env.example      # 环境变量示例文件
 │   ├── README.md         # Docker部署说明
-│   ├── config/           # Docker配置文件目录
 │   └── scripts/          # Docker相关脚本
-│       ├── start.sh      # 启动Docker容器
-│       ├── stop.sh       # 停止Docker容器
-│       ├── logs.sh       # 查看Docker日志
-│       ├── rebuild.sh    # 重建Docker镜像
-│       └── test.sh       # 测试Docker容器
+│       ├── start.sh          # 启动容器（立即执行任务）
+│       ├── start-scheduled.sh # 启动容器（仅按计划时间执行）
+│       ├── stop.sh           # 停止容器
+│       ├── logs.sh           # 查看日志
+│       ├── rebuild.sh        # 重建镜像
+│       └── test.sh           # 测试容器
 ├── tests/                # 测试代码目录
 │   └── test_news_sources.py # 新闻源测试
 ├── setup.py              # 安装脚本
@@ -364,7 +368,7 @@ python src/core/article_generator.py --verbose
 
 ## Docker部署
 
-本项目提供了Docker支持，使用Docker可以更简单地部署和运行定时任务，避免环境配置问题。所有Docker相关文件都集中在`docker/`目录下，便于管理和维护。
+本项目提供了完整的Docker支持，使用Docker可以更简单地部署和运行定时任务，避免环境配置问题。所有Docker相关文件都集中在`docker/`目录下，便于管理和维护。
 
 ### 使用Docker运行
 
@@ -389,8 +393,11 @@ python src/core/article_generator.py --verbose
    # 给脚本添加执行权限
    chmod +x docker/scripts/*.sh
    
-   # 启动服务
+   # 立即执行任务并按计划时间执行
    ./docker/scripts/start.sh
+   
+   # 仅按计划时间执行（不立即执行）
+   ./docker/scripts/start-scheduled.sh
    
    # 查看日志
    ./docker/scripts/logs.sh
@@ -400,9 +407,6 @@ python src/core/article_generator.py --verbose
    
    # 重建Docker镜像
    ./docker/scripts/rebuild.sh
-   
-   # 测试Docker容器
-   ./docker/scripts/test.sh
    ```
 
 ### 环境变量配置
@@ -421,6 +425,9 @@ TIMEZONE=Asia/Shanghai
 
 # 使用的模型
 MODEL=gpt-4o
+
+# 是否在启动时立即执行任务
+IMMEDIATE_RUN=false
 ```
 
 这些环境变量会覆盖`docker-compose.yml`中的默认值。
@@ -435,65 +442,84 @@ Docker配置已经设置了数据持久化，所有数据都会保存在本地�
 
 这意味着即使容器被删除，你的数据也不会丢失。
 
-### 自定义Docker配置
+### 定时任务配置
 
-如果需要自定义Docker配置，可以编辑`docker/Dockerfile`和`docker/docker-compose.yml`文件。
+本项目支持两种定时任务启动模式：
 
-#### 修改时区
+1. **立即执行模式**：容器启动后立即执行一次任务，然后按计划时间执行
+   ```bash
+   ./docker/scripts/start.sh
+   ```
 
-默认时区设置为`America/Chicago`，如果需要修改，可以在`docker/.env`文件中更改`TIMEZONE`变量。
+2. **仅计划执行模式**：容器启动后不立即执行任务，只在计划时间执行
+   ```bash
+   ./docker/scripts/start-scheduled.sh
+   ```
 
-#### 修改使用的模型
-
-默认使用的模型为`gpt-4o`，如果需要修改，可以在`docker/.env`文件中更改`MODEL`变量。
-
-### Docker目录结构
-
-```
-docker/
-├── Dockerfile            # Docker镜像构建文件
-├── docker-compose.yml    # Docker Compose配置文件
-├── .dockerignore         # Docker构建忽略文件
-├── .env.example          # 环境变量示例文件
-├── README.md             # Docker部署说明
-├── config/               # Docker配置文件目录
-└── scripts/              # Docker相关脚本
-    ├── start.sh          # 启动Docker容器
-    ├── stop.sh           # 停止Docker容器
-    ├── logs.sh           # 查看Docker日志
-    ├── rebuild.sh        # 重建Docker镜像
-    └── test.sh           # 测试Docker容器
+计划执行时间在`config/config.py`中的`SCHEDULE_TIME`变量中设置，格式为`HH:MM`，例如：
+```python
+SCHEDULE_TIME = "08:00"  # 每天早上8点执行
 ```
 
-### 常见问题
+时区设置在Docker环境变量`TIMEZONE`中配置，例如：
+```
+TIMEZONE=Asia/Shanghai  # 使用中国标准时间
+```
 
-1. **容器无法启动**
+### 常见问题排除
 
-   检查日志以获取详细错误信息：
-   
+#### 容器启动失败
+
+1. 检查配置文件是否存在：
+   ```bash
+   ls -la ../config/config.py
+   ```
+
+2. 检查环境变量是否正确设置：
+   ```bash
+   cat docker/.env
+   ```
+
+3. 查看容器日志：
    ```bash
    ./docker/scripts/logs.sh
    ```
 
-2. **OpenAI API调用失败**
+#### 文件权限问题
 
-   确保在`config/config.py`中正确配置了API密钥，并且API密钥有效。
+如果遇到文件权限问题，可以尝试：
+```bash
+chmod -R 755 data logs config
+```
 
-3. **时区问题**
+#### 定时任务不按预期执行
 
-   如果遇到时区问题，可以尝试在`docker/.env`文件中修改`TIMEZONE`变量。
-
-4. **文件权限问题**
-
-   如果遇到文件权限问题，可以尝试以下命令：
-   
+1. 检查环境变量`IMMEDIATE_RUN`的设置：
    ```bash
-   # 确保脚本有执行权限
-   chmod +x docker/scripts/*.sh
+   # 查看docker-compose配置
+   cd docker && docker-compose config
    
-   # 确保数据目录有正确的权限
-   chmod -R 755 data logs
+   # 查看容器中的环境变量
+   docker exec ai-news-scheduler env | grep IMMEDIATE
    ```
+
+2. 如果使用`start-scheduled.sh`脚本但任务仍然立即执行，请尝试重新构建镜像：
+   ```bash
+   ./docker/scripts/rebuild.sh
+   ./docker/scripts/start-scheduled.sh
+   ```
+
+3. 检查容器日志中的执行计划：
+   ```bash
+   ./docker/scripts/logs.sh
+   ```
+   应该能看到类似以下的输出：
+   ```
+   首次立即执行: 关闭
+   已禁用首次启动立即执行，将仅在计划时间运行
+   ```
+
+更多Docker部署相关的详细说明，请参考`docker/README.md`文件。
 
 ## 模块说明
 
@@ -702,6 +728,7 @@ GPT-4o的发布标志着AI发展的新纪元。它不仅展示了技术的进步
 - [ ] 支持多语言新闻采集和文章生成
 - [ ] 添加更多OpenAI模型的支持
 - [x] 实现多风格文章生成和风格记忆功能，避免连续文章风格重复
+- [x] 完善Docker部署方案，支持不同的启动模式
 - [ ] 增强可视化界面，添加更多交互功能
 - [ ] 增强数据库功能，支持更复杂的查询和统计
 - [ ] 优化文本清理算法，支持自定义清理规则

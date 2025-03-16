@@ -13,4 +13,5 @@ services:
       - ../config:/app/config
     environment:
       - TZ=${TIMEZONE:-America/Chicago}
+      - IMMEDIATE_RUN=${IMMEDIATE_RUN:-false}
     command: ["--model", "${MODEL:-gpt-4o}"] 

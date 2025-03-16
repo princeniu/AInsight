@@ -19,6 +19,15 @@ RUN mkdir -p data/articles data/database logs
 
 # 设置环境变量
 ENV PYTHONPATH=/app
+ENV IMMEDIATE_RUN=true
+
+# 创建启动脚本
+RUN echo '#!/bin/bash\n\
+if [ "$IMMEDIATE_RUN" = "true" ]; then\n\
+  python src/scheduler/scheduler.py --verbose "$@"\n\
+else\n\
+  python src/scheduler/scheduler.py --verbose --no-immediate-run "$@"\n\
+fi' > /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 # 设置入口点
-ENTRYPOINT ["python", "src/scheduler/scheduler.py", "--verbose"] 
+ENTRYPOINT ["/app/docker-entrypoint.sh"] 

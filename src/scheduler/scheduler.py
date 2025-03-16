@@ -86,6 +86,8 @@ def parse_arguments():
                         help=f"要使用的OpenAI模型 (默认: {DEFAULT_MODEL})")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="显示详细的进度信息")
+    parser.add_argument("--no-immediate-run", action="store_true",
+                        help="禁止在首次启动时立即执行任务，仅按计划时间执行")
     
     return parser.parse_args()
 
@@ -237,13 +239,14 @@ def run_task(model=None, verbose=False):
     logger.info("定时任务执行完毕")
 
 
-def setup_schedule(model=None, verbose=False):
+def setup_schedule(model=None, verbose=False, no_immediate_run=False):
     """
     设置定时任务
     
     Args:
         model: 要使用的模型名称
         verbose: 是否显示详细进度
+        no_immediate_run: 是否禁止首次启动时立即执行
     """
     # 创建一个带有模型参数的任务函数
     def scheduled_task():
@@ -266,12 +269,19 @@ def setup_schedule(model=None, verbose=False):
             f"<b>🕒 AI新闻自动化定时器已启动</b>\n\n"
             f"<b>📅 执行计划:</b> 每天 {SCHEDULE_TIME} {timezone_info}\n"
             f"<b>🤖 使用模型:</b> {model}\n"
-            f"<b>📊 详细输出:</b> {'开启' if verbose else '关闭'}\n\n"
+            f"<b>📊 详细输出:</b> {'开启' if verbose else '关闭'}\n"
+            f"<b>🔄 首次立即执行:</b> {'关闭' if no_immediate_run else '开启'}\n\n"
             f"<i>定时器将按计划自动执行任务</i>"
         )
         telegram.send_message(schedule_message)
         if verbose:
             print_status("已发送Telegram定时器启动通知", "通知", Fore.CYAN)
+    
+    # 如果设置了不立即执行，则跳过首次执行检查
+    if no_immediate_run:
+        print_status("已禁用首次启动立即执行，将仅在计划时间运行", "设置", Fore.YELLOW)
+        logger.info("已禁用首次启动立即执行，将仅在计划时间运行")
+        return
     
     # 解析配置的时间
     try:
@@ -347,6 +357,7 @@ def main():
     args = parse_arguments()
     model = args.model
     verbose = args.verbose
+    no_immediate_run = args.no_immediate_run
     
     print("\n" + "=" * 60)
     print(f"{Fore.CYAN}AI热点新闻自动化采集与文章生成定时器{Style.RESET_ALL}")
@@ -356,6 +367,7 @@ def main():
     print(f"定时执行时间: {Fore.GREEN}{SCHEDULE_TIME} {timezone_info}{Style.RESET_ALL}")
     
     print(f"显示详细进度: {Fore.GREEN}{verbose}{Style.RESET_ALL}")
+    print(f"首次立即执行: {Fore.GREEN}{'关闭' if no_immediate_run else '开启'}{Style.RESET_ALL}")
     if telegram:
         print(f"Telegram通知: {Fore.GREEN}已启用{Style.RESET_ALL}")
     else:
@@ -365,7 +377,7 @@ def main():
     logger.info(f"AI热点新闻自动化采集与文章生成定时器已启动 (使用模型: {model})")
     
     # 设置定时任务
-    setup_schedule(model, verbose)
+    setup_schedule(model, verbose, no_immediate_run)
     
     # 生成cron配置（仅供参考）
     generate_cron_config(model, verbose)
