@@ -92,4 +92,18 @@ docker-logs/
 *.pem
 *.key
 *.crt
-docker/certs/ 
+docker/certs/
+
+# Private local state and generated artifacts
+.pytest_cache/
+.env.*
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+*.sqlite*
+*.db-*
+.venv/
+node_modules/
+.worktrees/
